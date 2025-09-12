@@ -19,8 +19,18 @@
 #include <unordered_map>
 #include <vector>
 
+#include "type.h"
+
 namespace EloqVec
 {
+
+constexpr static std::string_view vector_index_meta_table_name_sv{
+    "__vector_index_meta_table"};
+
+inline static txservice::TableName vector_index_meta_table{
+    vector_index_meta_table_name_sv,
+    txservice::TableType::Primary,
+    txservice::TableEngine::InternalHash};
 
 /**
  * @brief Vector index algorithm types

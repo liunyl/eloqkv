@@ -35,7 +35,7 @@ public:
     ~VectorMetadata() = default;
 
     void Encode(std::string &encoded_str) const;
-    void Decode(const std::string &encoded_str);
+    void Decode(const char *buf, size_t buff_size, size_t &offset);
 
 private:
     std::string name_{""};
@@ -43,6 +43,7 @@ private:
     Algorithm algorithm_{Algorithm::HNSW};
     DistanceMetric metric_{DistanceMetric::L2SQ};
     std::unordered_map<std::string, std::string> alg_params_;
+    std::string file_path_{""};
     size_t buffer_threshold_{10000};
     // Total number of vectors in the index
     size_t size_{0};
