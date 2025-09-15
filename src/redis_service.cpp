@@ -470,6 +470,10 @@ bool RedisServiceImpl::Init(brpc::Server &brpc_server)
         prebuilt_tables.try_emplace(redis_table_name, image);
     }
 
+    // vector index meta table
+    prebuilt_tables.try_emplace(EloqVec::vector_index_meta_table,
+                                EloqVec::vector_index_meta_table.String());
+
     std::string txlog_service =
         !CheckCommandLineFlagIsDefault("txlog_service_list")
             ? FLAGS_txlog_service_list
@@ -1144,6 +1148,7 @@ bool RedisServiceImpl::Init(brpc::Server &brpc_server)
         {
             store_hd_->AppendPreBuiltTable(table_name);
         }
+        store_hd_->AppendPreBuiltTable(EloqVec::vector_index_meta_table);
 
         if (!store_hd_->Connect())
         {
@@ -6479,13 +6484,30 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
                                       OutputHandler *output,
                                       bool auto_commit)
 {
-    // TODO: Implement vector index creation logic
-    // This should:
-    // 1. Validate the hash set exists
-    // 2. Create vector index metadata
-    // 3. Initialize vector index structure
-    // 4. Store index configuration
-    cmd->result_.err_code_ = RD_OK;
+    EloqVec::IndexConfig index_config(cmd->index_name_.String(),
+                                      cmd->dimensions_,
+                                      cmd->algorithm_,
+                                      cmd->metric_type_,
+                                      FLAGS_eloq_data_path,
+                                      std::move(cmd->alg_params_));
+    EloqVec::VectorOpResult res =
+        EloqVec::VectorHandler::Instance().Create(index_config, txm);
+    if (res == EloqVec::VectorOpResult::SUCCEED)
+    {
+        if (auto_commit)
+        {
+            CommitTx(txm);
+        }
+        cmd->result_.err_code_ = RD_OK;
+    }
+    else
+    {
+        if (auto_commit)
+        {
+            AbortTx(txm);
+        }
+        cmd->result_.err_code_ = RD_ERR_VECTOR_INDX_CREATE_FAILED;
+    }
     cmd->OutputResult(output, ctx);
     return true;
 }
@@ -6497,12 +6519,24 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
                                       OutputHandler *output,
                                       bool auto_commit)
 {
-    // TODO: Implement vector index info logic
-    // This should:
-    // 1. Validate the index exists
-    // 2. Retrieve index metadata
-    // 3. Gather index statistics
-    cmd->result_.err_code_ = RD_OK;
+    EloqVec::VectorOpResult res = EloqVec::VectorHandler::Instance().Info(
+        cmd->index_name_.String(), txm, cmd->metadata_);
+    if (res == EloqVec::VectorOpResult::SUCCEED)
+    {
+        if (auto_commit)
+        {
+            CommitTx(txm);
+        }
+        cmd->result_.err_code_ = RD_OK;
+    }
+    else
+    {
+        if (auto_commit)
+        {
+            AbortTx(txm);
+        }
+        cmd->result_.err_code_ = RD_ERR_VECTOR_INDX_INFO_FAILED;
+    }
     cmd->OutputResult(output, ctx);
     return true;
 }
