@@ -12,11 +12,14 @@
 
 #pragma once
 
+#include <memory>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 
 #include "eloq_string_key_record.h"
 #include "tx_execution.h"
+#include "vector_index.h"
 #include "vector_type.h"
 
 namespace EloqVec
@@ -39,6 +42,11 @@ public:
                 size_t buff_size,
                 size_t &offset,
                 uint64_t version);
+
+    const std::string &VecName() const
+    {
+        return name_;
+    }
 
     Algorithm VecAlgorithm() const
     {
@@ -68,6 +76,16 @@ public:
     uint64_t LastPersistTs() const
     {
         return last_persist_ts_;
+    }
+
+    size_t Dimension() const
+    {
+        return dimension_;
+    }
+
+    const std::string &FilePath() const
+    {
+        return file_path_;
     }
 
 private:
@@ -202,6 +220,48 @@ private:
     VectorHandler(VectorHandler &&) = delete;
     VectorHandler &operator=(const VectorHandler &) = delete;
     VectorHandler &operator=(VectorHandler &&) = delete;
+
+    /**
+     * @brief Get or create a vector index from cache
+     *
+     * This function handles the logic of getting an index from cache,
+     * checking version compatibility, and initializing if needed.
+     *
+     * @param name Index name
+     * @param h_record Record containing encoded metadata
+     * @param index_version Current index version from storage
+     * @param search_params Search parameters to override alg_params
+     * @param index_ptr (OUT) Pointer to the vector index
+     * @return Result of the operation
+     */
+    VectorOpResult GetOrCreateIndex(
+        const std::string &name,
+        const txservice::TxRecord::Uptr &h_record,
+        uint64_t index_version,
+        const std::unordered_map<std::string, std::string> &search_params,
+        VectorIndex *&index_ptr);
+
+    /**
+     * @brief Initialize a vector index with given configuration
+     *
+     * @param index_ptr Pointer to the vector index to initialize
+     * @param h_record Record containing encoded metadata
+     * @param index_version Current index version from storage
+     * @param search_params Search parameters to override alg_params
+     * @return Result of the initialization
+     */
+    VectorOpResult InitializeIndex(
+        VectorIndex *index_ptr,
+        const txservice::TxRecord::Uptr &h_record,
+        uint64_t index_version,
+        const std::unordered_map<std::string, std::string> &search_params);
+
+    // Vector index cache with thread safety
+    mutable std::shared_mutex vec_indexes_mutex_;
+    // map of index name to index version and index object
+    std::unordered_map<std::string,
+                       std::pair<uint64_t, std::unique_ptr<VectorIndex>>>
+        vec_indexes_;
 };
 
 }  // namespace EloqVec

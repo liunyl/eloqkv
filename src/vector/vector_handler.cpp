@@ -12,8 +12,10 @@
 #include "vector_handler.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <utility>
 
+#include "hnsw_vector_index.h"
 #include "tx_request.h"
 #include "tx_util.h"
 
@@ -268,7 +270,14 @@ VectorOpResult VectorHandler::Create(const IndexConfig &idx_spec,
         return VectorOpResult::INDEX_META_OP_FAILED;
     }
 
-    // TODO(ysw): create the vector index object in memory.
+    // Create the vector index object in memory and add to cache
+    {
+        std::lock_guard<std::shared_mutex> lock(vec_indexes_mutex_);
+        auto hnsw_index = std::make_unique<HNSWVectorIndex>();
+        auto emplace_pair = vec_indexes_.try_emplace(
+            idx_spec.name, std::make_pair(0, std::move(hnsw_index)));
+        assert(emplace_pair.second);
+    }
 
     return VectorOpResult::SUCCEED;
 }
@@ -309,7 +318,16 @@ VectorOpResult VectorHandler::Drop(const std::string &name,
         return VectorOpResult::INDEX_NOT_EXIST;
     }
 
-    // 3. The index exists, delete it using OperationType::Delete
+    // 3. Decode metadata to get file path before deletion
+    uint64_t index_version = read_req.Result().second;
+    VectorMetadata metadata;
+    const char *blob_data = h_record->EncodedBlobData();
+    size_t blob_size = h_record->EncodedBlobSize();
+    size_t offset = 0;
+    metadata.Decode(blob_data, blob_size, offset, index_version);
+    const std::string &file_path = metadata.FilePath();
+
+    // 4. The index exists, delete it using OperationType::Delete
     TxErrorCode err_code = txm->TxUpsert(vector_index_meta_table,
                                          0,
                                          std::move(tx_key),
@@ -320,7 +338,28 @@ VectorOpResult VectorHandler::Drop(const std::string &name,
         return VectorOpResult::INDEX_META_OP_FAILED;
     }
 
-    // TODO(ysw): delete the index file and the vector index object in memory.
+    // 5. Delete the index file and the vector index object in memory
+    {
+        std::lock_guard<std::shared_mutex> lock(vec_indexes_mutex_);
+        // Remove from cache
+        vec_indexes_.erase(name);
+    }
+
+    // Delete the physical file
+    // TODO(ysw): May do this after the transaction is committed.
+    if (!file_path.empty() && std::filesystem::exists(file_path))
+    {
+        try
+        {
+            std::filesystem::remove(file_path);
+        }
+        catch (const std::filesystem::filesystem_error &e)
+        {
+            LOG(WARNING) << "Failed to delete index file: " << file_path
+                         << ", error: " << e.what();
+        }
+    }
+
     return VectorOpResult::SUCCEED;
 }
 
@@ -415,33 +454,18 @@ VectorOpResult VectorHandler::Search(
 
     uint64_t index_version = read_req.Result().second;
 
-    // 3. The index exists, decode the metadata
-    VectorMetadata metadata;
-    const char *blob_data = h_record->EncodedBlobData();
-    size_t blob_size = h_record->EncodedBlobSize();
-    size_t offset = 0;
-    metadata.Decode(blob_data, blob_size, offset, index_version);
+    // 3. Get or create the vector index from cache
+    VectorIndex *index_ptr = nullptr;
+    // TODO(ysw): search parames ??
+    VectorOpResult get_result = GetOrCreateIndex(
+        name, h_record, index_version, search_params, index_ptr);
+    if (get_result != VectorOpResult::SUCCEED)
+    {
+        return get_result;
+    }
 
-    // 4. Validate query vector dimensions match index configuration
-    // if (query_vector.size() != metadata.Dimension())
-    // {
-    //     return VectorOpResult::UNKNOWN;  // TODO: Add specific error code for
-    //                                      // dimension mismatch
-    // }
-
-    // 5. TODO: Perform actual vector search using the appropriate algorithm
-    // This would involve:
-    // - Loading the vector index from storage (metadata.FilePath())
-    // - Using the appropriate algorithm (metadata.Algorithm())
-    // - Applying the distance metric (metadata.Metric())
-    // - Executing the search with k_count and search_params
-    // - Populating vector_result with IDs and distances
-
-    // For now, return empty results as placeholder
-    vector_result.ids.clear();
-    vector_result.distances.clear();
-    vector_result.vectors.clear();
-
+    // 4. Perform vector search
+    vector_result = index_ptr->search(query_vector, k_count);
     return VectorOpResult::SUCCEED;
 }
 
@@ -450,13 +474,57 @@ VectorOpResult VectorHandler::Add(const std::string &name,
                                   const std::vector<float> &vector,
                                   txservice::TransactionExecution *txm)
 {
-    // TODO: Implement vector addition to index
-    // This should:
-    // 1. Validate the index exists and is writable
-    // 2. Extract vector data from the record
-    // 3. Validate vector dimensions match index configuration
-    // 4. Add the vector to the index with the provided key
-    // 5. Update index statistics and metadata
+    // 1. Check if the index exists by reading from vector_index_meta_table
+    std::string h_key = build_metadata_key(name);
+    TxKey tx_key = EloqStringKey::Create(h_key.c_str(), h_key.size());
+    TxRecord::Uptr h_record = EloqStringRecord::Create();
+    ReadTxRequest read_req(&vector_index_meta_table,
+                           0,
+                           &tx_key,
+                           h_record.get(),
+                           false, /* is_for_write */
+                           false, /* is_for_share */
+                           false, /* read_local */
+                           0,
+                           false,
+                           false,
+                           false,
+                           nullptr,
+                           nullptr,
+                           txm);
+    txm->Execute(&read_req);
+    read_req.Wait();
+    if (read_req.IsError())
+    {
+        return VectorOpResult::INDEX_META_OP_FAILED;
+    }
+
+    // 2. Check if the index exists
+    if (read_req.Result().first != RecordStatus::Normal)
+    {
+        assert(read_req.Result().first == RecordStatus::Deleted);
+        // The index does not exist
+        return VectorOpResult::INDEX_NOT_EXIST;
+    }
+
+    uint64_t index_version = read_req.Result().second;
+
+    // 3. Get or create the vector index from cache
+    VectorIndex *index_ptr = nullptr;
+    VectorOpResult get_result =
+        GetOrCreateIndex(name, h_record, index_version, {}, index_ptr);
+    if (get_result != VectorOpResult::SUCCEED)
+    {
+        return get_result;
+    }
+
+    // TODO(ysw): Add item to log object.
+
+    // 4. Add the vector to the index
+    if (!index_ptr->add(vector, id))
+    {
+        return VectorOpResult::INDEX_ADD_FAILED;
+    }
     return VectorOpResult::SUCCEED;
 }
 
@@ -465,13 +533,57 @@ VectorOpResult VectorHandler::Update(const std::string &name,
                                      const std::vector<float> &vector,
                                      txservice::TransactionExecution *txm)
 {
-    // TODO: Implement vector update to index
-    // This should:
-    // 1. Validate the index exists and is writable
-    // 2. Extract vector data from the record
-    // 3. Validate vector dimensions match index configuration
-    // 4. Update the vector in the index with the provided key
-    // 5. Update index statistics and metadata
+    // 1. Check if the index exists by reading from vector_index_meta_table
+    std::string h_key = build_metadata_key(name);
+    TxKey tx_key = EloqStringKey::Create(h_key.c_str(), h_key.size());
+    TxRecord::Uptr h_record = EloqStringRecord::Create();
+    ReadTxRequest read_req(&vector_index_meta_table,
+                           0,
+                           &tx_key,
+                           h_record.get(),
+                           false, /* is_for_write */
+                           false, /* is_for_share */
+                           false, /* read_local */
+                           0,
+                           false,
+                           false,
+                           false,
+                           nullptr,
+                           nullptr,
+                           txm);
+    txm->Execute(&read_req);
+    read_req.Wait();
+    if (read_req.IsError())
+    {
+        return VectorOpResult::INDEX_META_OP_FAILED;
+    }
+
+    // 2. Check if the index exists
+    if (read_req.Result().first != RecordStatus::Normal)
+    {
+        assert(read_req.Result().first == RecordStatus::Deleted);
+        // The index does not exist
+        return VectorOpResult::INDEX_NOT_EXIST;
+    }
+
+    uint64_t index_version = read_req.Result().second;
+
+    // 3. Get or create the vector index from cache
+    VectorIndex *index_ptr = nullptr;
+    VectorOpResult get_result =
+        GetOrCreateIndex(name, h_record, index_version, {}, index_ptr);
+    if (get_result != VectorOpResult::SUCCEED)
+    {
+        return get_result;
+    }
+
+    // TODO(ysw): Update item to log object.
+
+    // 4. Update the vector in the index
+    if (!index_ptr->update(vector, id))
+    {
+        return VectorOpResult::INDEX_UPDATE_FAILED;
+    }
     return VectorOpResult::SUCCEED;
 }
 
@@ -479,13 +591,181 @@ VectorOpResult VectorHandler::Delete(const std::string &name,
                                      uint64_t id,
                                      txservice::TransactionExecution *txm)
 {
-    // TODO: Implement vector deletion from index
-    // This should:
-    // 1. Validate the index exists and is writable
-    // 2. Extract vector data from the record
-    // 3. Validate vector dimensions match index configuration
-    // 4. Delete the vector from the index with the provided key
-    // 5. Update index statistics and metadata
+    // 1. Check if the index exists by reading from vector_index_meta_table
+    std::string h_key = build_metadata_key(name);
+    TxKey tx_key = EloqStringKey::Create(h_key.c_str(), h_key.size());
+    TxRecord::Uptr h_record = EloqStringRecord::Create();
+    ReadTxRequest read_req(&vector_index_meta_table,
+                           0,
+                           &tx_key,
+                           h_record.get(),
+                           false, /* is_for_write */
+                           false, /* is_for_share */
+                           false, /* read_local */
+                           0,
+                           false,
+                           false,
+                           false,
+                           nullptr,
+                           nullptr,
+                           txm);
+    txm->Execute(&read_req);
+    read_req.Wait();
+    if (read_req.IsError())
+    {
+        return VectorOpResult::INDEX_META_OP_FAILED;
+    }
+
+    // 2. Check if the index exists
+    if (read_req.Result().first != RecordStatus::Normal)
+    {
+        assert(read_req.Result().first == RecordStatus::Deleted);
+        // The index does not exist
+        return VectorOpResult::INDEX_NOT_EXIST;
+    }
+
+    uint64_t index_version = read_req.Result().second;
+
+    // 3. Get or create the vector index from cache
+    VectorIndex *index_ptr = nullptr;
+    VectorOpResult get_result =
+        GetOrCreateIndex(name, h_record, index_version, {}, index_ptr);
+    if (get_result != VectorOpResult::SUCCEED)
+    {
+        return get_result;
+    }
+
+    // TODO(ysw): Delete item to log object.
+
+    // 4. Delete the vector from the index
+    if (!index_ptr->remove(id))
+    {
+        return VectorOpResult::INDEX_DELETE_FAILED;
+    }
     return VectorOpResult::SUCCEED;
 }
+
+VectorOpResult VectorHandler::GetOrCreateIndex(
+    const std::string &name,
+    const txservice::TxRecord::Uptr &h_record,
+    uint64_t index_version,
+    const std::unordered_map<std::string, std::string> &search_params,
+    VectorIndex *&index_ptr)
+{
+    assert(index_version > 0);
+    // First, try to get read lock to check cache
+    {
+        std::shared_lock<std::shared_mutex> read_lock(vec_indexes_mutex_);
+        auto it = vec_indexes_.find(name);
+        if (it != vec_indexes_.end())
+        {
+            uint64_t cached_version = it->second.first;
+            auto &cached_index_uptr = it->second.second;
+
+            if (cached_version == 0)
+            {
+                // Index exists but not initialized, need to initialize
+                // Will upgrade to write lock below
+            }
+            else if (cached_version != index_version)
+            {
+                return VectorOpResult::INDEX_VERSION_MISMATCH;
+            }
+            else
+            {
+                // Version matches, return the cached index
+                index_ptr = cached_index_uptr.get();
+                return VectorOpResult::SUCCEED;
+            }
+        }
+    }
+
+    // Need to create new index or initialize existing one
+    {
+        std::lock_guard<std::shared_mutex> write_lock(vec_indexes_mutex_);
+        // Double-checked locking pattern
+        auto it = vec_indexes_.find(name);
+        if (it != vec_indexes_.end() && it->second.first > 0)
+        {
+            // Another thread has initialized the index, check version
+            if (it->second.first != index_version)
+            {
+                return VectorOpResult::INDEX_VERSION_MISMATCH;
+            }
+            index_ptr = it->second.second.get();
+            return VectorOpResult::SUCCEED;
+        }
+
+        // Need to create or initialize index
+        if (it == vec_indexes_.end())
+        {
+            // Create new index
+            auto hnsw_index = std::make_unique<HNSWVectorIndex>();
+            auto emplace_pair = vec_indexes_.try_emplace(
+                name, std::make_pair(index_version, std::move(hnsw_index)));
+            assert(emplace_pair.second);
+            it = emplace_pair.first;
+        }
+
+        // Initialize the index
+        VectorOpResult init_result = InitializeIndex(
+            it->second.second.get(), h_record, index_version, search_params);
+        if (init_result != VectorOpResult::SUCCEED)
+        {
+            // Clean up on failure
+            vec_indexes_.erase(name);
+            return init_result;
+        }
+
+        // Update version and return
+        it->second.first = index_version;
+        index_ptr = it->second.second.get();
+        return VectorOpResult::SUCCEED;
+    }
+}
+
+VectorOpResult VectorHandler::InitializeIndex(
+    VectorIndex *index_ptr,
+    const txservice::TxRecord::Uptr &h_record,
+    uint64_t index_version,
+    const std::unordered_map<std::string, std::string> &search_params)
+{
+    if (!index_ptr)
+    {
+        return VectorOpResult::INDEX_INIT_FAILED;
+    }
+
+    // Decode metadata from h_record
+    VectorMetadata metadata;
+    const char *blob_data = h_record->EncodedBlobData();
+    size_t blob_size = h_record->EncodedBlobSize();
+    size_t offset = 0;
+    metadata.Decode(blob_data, blob_size, offset, index_version);
+
+    // Construct IndexConfig from metadata
+    IndexConfig config;
+    config.name = metadata.VecName();
+    config.dimension = metadata.Dimension();
+    config.algorithm = metadata.VecAlgorithm();
+    config.distance_metric = metadata.VecMetric();
+    config.storage_path = metadata.FilePath();
+
+    // Use search_params to override alg_params
+    config.params = search_params;
+
+    // Initialize the index
+    if (!index_ptr->initialize(config))
+    {
+        return VectorOpResult::INDEX_INIT_FAILED;
+    }
+
+    // Load the index from storage
+    if (!index_ptr->load(metadata.FilePath()))
+    {
+        return VectorOpResult::INDEX_LOAD_FAILED;
+    }
+
+    return VectorOpResult::SUCCEED;
+}
+
 }  // namespace EloqVec
