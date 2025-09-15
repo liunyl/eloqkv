@@ -54,8 +54,8 @@ VectorMetadata::VectorMetadata(const IndexConfig &vec_spec)
         .append("-")
         .append(std::to_string(ts))
         .append(".index");
-    created_ts_ = ts;
-    last_build_ts_ = ts;
+    created_ts_ = 0;
+    last_persist_ts_ = 0;
 }
 
 void VectorMetadata::Encode(std::string &encoded_str) const
@@ -64,7 +64,7 @@ void VectorMetadata::Encode(std::string &encoded_str) const
      * The format of the encoded metadata:
      * nameLen | name | dimension | algorithm | metric | paramCount | key1Len |
      * key1 | value1Len | value1 | ... | filePathLen | filePath |
-     * bufferThreshold | size | createdTs | lastBuildTs
+     * bufferThreshold | size | createdTs
      * 1. nameLen is a 2-byte integer representing the length of the name. 2.
      * name is a string. 3. dimension is a 8-byte integer representing the
      * dimension. 4. algorithm is a 1-byte integer representing the
@@ -76,8 +76,7 @@ void VectorMetadata::Encode(std::string &encoded_str) const
      * bufferThreshold is a 8-byte integer representing the buffer
      * threshold. 11. size is a 8-byte integer representing the size of the
      * index. 12. createdTs is a 8-byte integer representing the creation
-     * timestamp. 13. lastBuildTs is a 8-byte integer representing the last
-     * rebuild timestamp.
+     * timestamp.
      */
     uint16_t name_len = static_cast<uint16_t>(name_.size());
     size_t len_sizeof = sizeof(uint16_t);
@@ -138,13 +137,12 @@ void VectorMetadata::Encode(std::string &encoded_str) const
     len_sizeof = sizeof(uint64_t);
     val_ptr = reinterpret_cast<const char *>(&created_ts_);
     encoded_str.append(val_ptr, len_sizeof);
-
-    len_sizeof = sizeof(uint64_t);
-    val_ptr = reinterpret_cast<const char *>(&last_build_ts_);
-    encoded_str.append(val_ptr, len_sizeof);
 }
 
-void VectorMetadata::Decode(const char *buf, size_t buff_size, size_t &offset)
+void VectorMetadata::Decode(const char *buf,
+                            size_t buff_size,
+                            size_t &offset,
+                            uint64_t version)
 {
     uint16_t name_len = *reinterpret_cast<const uint16_t *>(buf + offset);
     offset += sizeof(uint16_t);
@@ -203,10 +201,10 @@ void VectorMetadata::Decode(const char *buf, size_t buff_size, size_t &offset)
     offset += sizeof(size_t);
 
     created_ts_ = *reinterpret_cast<const uint64_t *>(buf + offset);
+    created_ts_ = created_ts_ == 0 ? version : created_ts_;
     offset += sizeof(uint64_t);
 
-    last_build_ts_ = *reinterpret_cast<const uint64_t *>(buf + offset);
-    offset += sizeof(uint64_t);
+    last_persist_ts_ = version;
     assert(offset == buff_size);
 }
 
@@ -241,13 +239,11 @@ VectorOpResult VectorHandler::Create(const IndexConfig &idx_spec,
     read_req.Wait();
     if (read_req.IsError())
     {
-        AbortTx(txm);
-        return VectorOpResult::UNKNOWN;
+        return VectorOpResult::INDEX_META_OP_FAILED;
     }
 
     if (read_req.Result().first == RecordStatus::Normal)
     {
-        CommitTx(txm);
         // The index already exists
         return VectorOpResult::INDEX_EXISTED;
     }
@@ -269,11 +265,11 @@ VectorOpResult VectorHandler::Create(const IndexConfig &idx_spec,
                                          OperationType::Insert);
     if (err_code != TxErrorCode::NO_ERROR)
     {
-        CommitTx(txm);
-        return VectorOpResult::UNKNOWN;
+        return VectorOpResult::INDEX_META_OP_FAILED;
     }
 
-    CommitTx(txm);
+    // TODO(ysw): create the vector index object in memory.
+
     return VectorOpResult::SUCCEED;
 }
 
@@ -288,7 +284,7 @@ VectorOpResult VectorHandler::Drop(const std::string &name,
                            0,
                            &tx_key,
                            h_record.get(),
-                           false, /* is_for_write */
+                           true,  /* is_for_write */
                            false, /* is_for_share */
                            false, /* read_local */
                            0,
@@ -302,15 +298,13 @@ VectorOpResult VectorHandler::Drop(const std::string &name,
     read_req.Wait();
     if (read_req.IsError())
     {
-        AbortTx(txm);
-        return VectorOpResult::UNKNOWN;
+        return VectorOpResult::INDEX_META_OP_FAILED;
     }
 
     // 2. Check if the index exists
     if (read_req.Result().first != RecordStatus::Normal)
     {
         assert(read_req.Result().first == RecordStatus::Deleted);
-        CommitTx(txm);
         // The index does not exist
         return VectorOpResult::INDEX_NOT_EXIST;
     }
@@ -323,11 +317,10 @@ VectorOpResult VectorHandler::Drop(const std::string &name,
                                          OperationType::Delete);
     if (err_code != TxErrorCode::NO_ERROR)
     {
-        CommitTx(txm);
-        return VectorOpResult::UNKNOWN;
+        return VectorOpResult::INDEX_META_OP_FAILED;
     }
 
-    CommitTx(txm);
+    // TODO(ysw): delete the index file and the vector index object in memory.
     return VectorOpResult::SUCCEED;
 }
 
@@ -357,26 +350,25 @@ VectorOpResult VectorHandler::Info(const std::string &name,
     read_req.Wait();
     if (read_req.IsError())
     {
-        AbortTx(txm);
-        return VectorOpResult::UNKNOWN;
+        return VectorOpResult::INDEX_META_OP_FAILED;
     }
 
     // 2. Check if the index exists
     if (read_req.Result().first != RecordStatus::Normal)
     {
         assert(read_req.Result().first == RecordStatus::Deleted);
-        CommitTx(txm);
         // The index does not exist
         return VectorOpResult::INDEX_NOT_EXIST;
     }
+
+    uint64_t index_version = read_req.Result().second;
 
     // 3. The index exists, decode the metadata
     const char *blob_data = h_record->EncodedBlobData();
     size_t blob_size = h_record->EncodedBlobSize();
     size_t offset = 0;
-    metadata.Decode(blob_data, blob_size, offset);
+    metadata.Decode(blob_data, blob_size, offset, index_version);
 
-    CommitTx(txm);
     return VectorOpResult::SUCCEED;
 }
 
@@ -388,12 +380,68 @@ VectorOpResult VectorHandler::Search(
     txservice::TransactionExecution *txm,
     SearchResult &vector_result)
 {
-    // TODO: Implement vector search
-    // This should:
-    // 1. Validate the index exists
-    // 2. Parse search parameters (query vector, k, filters)
-    // 3. Perform similarity search using the appropriate algorithm
-    // 4. Return ranked results with distances
+    // 1. Check if the index exists by reading from vector_index_meta_table
+    std::string h_key = build_metadata_key(name);
+    TxKey tx_key = EloqStringKey::Create(h_key.c_str(), h_key.size());
+    TxRecord::Uptr h_record = EloqStringRecord::Create();
+    ReadTxRequest read_req(&vector_index_meta_table,
+                           0,
+                           &tx_key,
+                           h_record.get(),
+                           false, /* is_for_write */
+                           false, /* is_for_share */
+                           false, /* read_local */
+                           0,
+                           false,
+                           false,
+                           false,
+                           nullptr,
+                           nullptr,
+                           txm);
+    txm->Execute(&read_req);
+    read_req.Wait();
+    if (read_req.IsError())
+    {
+        return VectorOpResult::INDEX_META_OP_FAILED;
+    }
+
+    // 2. Check if the index exists
+    if (read_req.Result().first != RecordStatus::Normal)
+    {
+        assert(read_req.Result().first == RecordStatus::Deleted);
+        // The index does not exist
+        return VectorOpResult::INDEX_NOT_EXIST;
+    }
+
+    uint64_t index_version = read_req.Result().second;
+
+    // 3. The index exists, decode the metadata
+    VectorMetadata metadata;
+    const char *blob_data = h_record->EncodedBlobData();
+    size_t blob_size = h_record->EncodedBlobSize();
+    size_t offset = 0;
+    metadata.Decode(blob_data, blob_size, offset, index_version);
+
+    // 4. Validate query vector dimensions match index configuration
+    // if (query_vector.size() != metadata.Dimension())
+    // {
+    //     return VectorOpResult::UNKNOWN;  // TODO: Add specific error code for
+    //                                      // dimension mismatch
+    // }
+
+    // 5. TODO: Perform actual vector search using the appropriate algorithm
+    // This would involve:
+    // - Loading the vector index from storage (metadata.FilePath())
+    // - Using the appropriate algorithm (metadata.Algorithm())
+    // - Applying the distance metric (metadata.Metric())
+    // - Executing the search with k_count and search_params
+    // - Populating vector_result with IDs and distances
+
+    // For now, return empty results as placeholder
+    vector_result.ids.clear();
+    vector_result.distances.clear();
+    vector_result.vectors.clear();
+
     return VectorOpResult::SUCCEED;
 }
 

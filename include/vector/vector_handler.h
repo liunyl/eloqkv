@@ -35,7 +35,40 @@ public:
     ~VectorMetadata() = default;
 
     void Encode(std::string &encoded_str) const;
-    void Decode(const char *buf, size_t buff_size, size_t &offset);
+    void Decode(const char *buf,
+                size_t buff_size,
+                size_t &offset,
+                uint64_t version);
+
+    Algorithm VecAlgorithm() const
+    {
+        return algorithm_;
+    }
+
+    DistanceMetric VecMetric() const
+    {
+        return metric_;
+    }
+
+    const std::unordered_map<std::string, std::string> &VecAlgParams() const
+    {
+        return alg_params_;
+    }
+
+    size_t Size() const
+    {
+        return size_;
+    }
+
+    uint64_t CreatedTs() const
+    {
+        return created_ts_;
+    }
+
+    uint64_t LastPersistTs() const
+    {
+        return last_persist_ts_;
+    }
 
 private:
     std::string name_{""};
@@ -48,7 +81,7 @@ private:
     // Total number of vectors in the index
     size_t size_{0};
     uint64_t created_ts_{0};
-    uint64_t last_build_ts_{0};
+    uint64_t last_persist_ts_{0};
 };
 
 /**
