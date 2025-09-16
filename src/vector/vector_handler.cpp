@@ -10,6 +10,7 @@
  */
 
 #include "vector_handler.h"
+#include "log_object.h"
 
 #include <algorithm>
 #include <utility>
@@ -214,6 +215,20 @@ VectorHandler &VectorHandler::Instance()
     return instance;
 }
 
+/**
+ * @brief Create a new vector index metadata entry and initialize its lifecycle log.
+ *
+ * Creates metadata for the vector index described by idx_spec in the internal
+ * metadata table and adds a corresponding log object. If an index with the
+ * same name already exists this function does not modify state.
+ *
+ * @param idx_spec Index configuration (name, dimension, algorithm, storage path, etc.).
+ *
+ * @return VectorOpResult indicating the outcome:
+ *   - SUCCEED: metadata and log were created successfully.
+ *   - INDEX_EXISTED: an index with the given name already exists.
+ *   - INDEX_META_OP_FAILED: a metadata table or log operation failed.
+ */
 VectorOpResult VectorHandler::Create(const IndexConfig &idx_spec,
                                      txservice::TransactionExecution *txm)
 {
@@ -268,11 +283,34 @@ VectorOpResult VectorHandler::Create(const IndexConfig &idx_spec,
         return VectorOpResult::INDEX_META_OP_FAILED;
     }
 
+    // 3. create the log object
+    LogError log_err = LogObject::create_log("vector_index:" + idx_spec.name, txm);
+    if (log_err != LogError::SUCCESS)
+    {
+        return VectorOpResult::INDEX_META_OP_FAILED;
+    }
+
     // TODO(ysw): create the vector index object in memory.
 
     return VectorOpResult::SUCCEED;
 }
 
+/**
+ * @brief Remove a vector index's metadata entry and its associated log.
+ *
+ * Attempts to delete the stored metadata for the index named @p name from the
+ * internal metadata table and removes the corresponding log object.
+ *
+ * On success the metadata entry and log are removed; the index file and any
+ * in-memory index instance are not modified by this function (TODO).
+ *
+ * @param name Index name whose metadata and log should be deleted.
+ * @return VectorOpResult
+ *   - VectorOpResult::SUCCEED on successful deletion.
+ *   - VectorOpResult::INDEX_NOT_EXIST if no metadata entry exists for @p name.
+ *   - VectorOpResult::INDEX_META_OP_FAILED if a metadata read/upsert or log
+ *     removal operation fails.
+ */
 VectorOpResult VectorHandler::Drop(const std::string &name,
                                    txservice::TransactionExecution *txm)
 {
@@ -316,6 +354,13 @@ VectorOpResult VectorHandler::Drop(const std::string &name,
                                          nullptr,
                                          OperationType::Delete);
     if (err_code != TxErrorCode::NO_ERROR)
+    {
+        return VectorOpResult::INDEX_META_OP_FAILED;
+    }
+
+    // 4. delete the log object
+    LogError log_err = LogObject::remove_log("vector_index:" + name, txm);
+    if (log_err != LogError::SUCCESS)
     {
         return VectorOpResult::INDEX_META_OP_FAILED;
     }
