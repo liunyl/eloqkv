@@ -11,6 +11,7 @@
  */
 
 #include "vector/log_object.h"
+#include "vector/vector_type.h"
 
 #include <cstring>
 
@@ -198,21 +199,15 @@ LogError LogObject::create_log(const std::string &log_name,
         return LogError::INVALID_PARAMETER;
     }
 
-    // Check if log already exists
-    txservice::TableName table_name_obj(std::string_view("log_table"),
-                                        txservice::TableType::Primary,
-                                        txservice::TableEngine::InternalHash);
-
     // Create key for metadata
     std::string meta_key = get_metadata_key(log_name);
-    txservice::EloqStringKey key_obj(meta_key.data(), meta_key.size());
-    txservice::TxKey tx_key(&key_obj);
+    txservice::TxKey tx_key = txservice::EloqStringKey::Create(meta_key.c_str(), meta_key.size());
 
     // Create record to read into
     txservice::EloqStringRecord record;
 
     // Create and execute read request
-    txservice::ReadTxRequest read_req(&table_name_obj,
+    txservice::ReadTxRequest read_req(&vector_index_meta_table,
                                       0,
                                       &tx_key,
                                       &record,
@@ -249,10 +244,6 @@ LogError LogObject::create_log(const std::string &log_name,
 
     // Write metadata to storage
     // Determine operation type
-    txservice::OperationType op_type =
-        (rec_status == txservice::RecordStatus::Deleted)
-            ? txservice::OperationType::Insert
-            : txservice::OperationType::Update;
 
     // Serialize metadata
     std::string serialized_meta;
@@ -265,18 +256,27 @@ LogError LogObject::create_log(const std::string &log_name,
         serialized_meta.size());
 
     // Create and execute upsert request
-    txservice::UpsertTxRequest upsert_req(&table_name_obj,
-                                          std::move(tx_key),
-                                          std::move(record_ptr),
-                                          op_type,
-                                          nullptr,
-                                          nullptr);
-    txm->Execute(&upsert_req);
-    upsert_req.Wait();
+    // txservice::UpsertTxRequest upsert_req(&table_name_obj,
+    //                                       std::move(tx_key),
+    //                                       std::move(record_ptr),
+    //                                       txservice::OperationType::Insert,
+    //                                       nullptr,
+    //                                       nullptr);
+    // txm->Execute(&upsert_req);
+    // LOG(INFO) << "Execute upsert request for log object " << log_name;
+    // upsert_req.Wait();
+    // LOG(INFO) << "Wait for upsert request for log object " << log_name;
+
+    txservice::TxErrorCode err_code = txm->TxUpsert(vector_index_meta_table,
+                                         0,
+                                         std::move(tx_key),
+                                         std::move(record_ptr),
+                                         txservice::OperationType::Insert);
 
     // Check for errors
-    if (upsert_req.ErrorCode() != txservice::TxErrorCode::NO_ERROR)
+    if (err_code != txservice::TxErrorCode::NO_ERROR)
     {
+        LOG(ERROR) << "Upsert request for log object " << log_name << " failed with error " << static_cast<int>(err_code);
         return LogError::STORAGE_ERROR;
     }
 
@@ -286,11 +286,6 @@ LogError LogObject::create_log(const std::string &log_name,
 bool LogObject::exists(const std::string &log_name,
                        txservice::TransactionExecution *txm)
 {
-    // Create table name for log storage
-    txservice::TableName table_name_obj(std::string_view("log_table"),
-                                        txservice::TableType::Primary,
-                                        txservice::TableEngine::InternalHash);
-
     // Create key for metadata
     std::string meta_key = get_metadata_key(log_name);
     txservice::EloqStringKey key_obj(meta_key.data(), meta_key.size());
@@ -300,7 +295,7 @@ bool LogObject::exists(const std::string &log_name,
     txservice::EloqStringRecord record;
 
     // Create and execute read request
-    txservice::ReadTxRequest read_req(&table_name_obj,
+    txservice::ReadTxRequest read_req(&vector_index_meta_table,
                                       0,
                                       &tx_key,
                                       &record,
@@ -344,18 +339,12 @@ LogError LogObject::append_log(const std::string &log_name,
         return LogError::SUCCESS;  // Nothing to append
     }
 
-    // Create table name for log storage
-    txservice::TableName table_name_obj(std::string_view("log_table"),
-                                        txservice::TableType::Primary,
-                                        txservice::TableEngine::InternalHash);
-
     // Read current metadata to get next sequence ID
     std::string meta_key = get_metadata_key(log_name);
-    txservice::EloqStringKey meta_key_obj(meta_key.data(), meta_key.size());
-    txservice::TxKey meta_tx_key(&meta_key_obj);
+    txservice::TxKey meta_tx_key = txservice::EloqStringKey::Create(meta_key.c_str(), meta_key.size());
 
     txservice::EloqStringRecord meta_record;
-    txservice::ReadTxRequest meta_read_req(&table_name_obj,
+    txservice::ReadTxRequest meta_read_req(&vector_index_meta_table,
                                            0,
                                            &meta_tx_key,
                                            &meta_record,
@@ -411,10 +400,10 @@ LogError LogObject::append_log(const std::string &log_name,
 
         // Create and execute upsert request
         std::string item_key = get_log_item_key(log_name, items[i].sequence_id);
-        txservice::EloqStringKey item_key_obj(item_key.data(), item_key.size());
-        txservice::TxKey item_tx_key(&item_key_obj);
+        txservice::TxKey item_tx_key = txservice::EloqStringKey::Create(item_key.c_str(), item_key.size());
+        // TODO(liunyl): impl batch upsert request
         txservice::UpsertTxRequest item_upsert_req(
-            &table_name_obj,
+            &vector_index_meta_table,
             std::move(item_tx_key),
             std::move(item_record_ptr),
             txservice::OperationType::Upsert,
@@ -446,7 +435,7 @@ LogError LogObject::append_log(const std::string &log_name,
         reinterpret_cast<const unsigned char *>(serialized_meta.c_str()),
         serialized_meta.size());
 
-    txservice::UpsertTxRequest meta_upsert_req(&table_name_obj,
+    txservice::UpsertTxRequest meta_upsert_req(&vector_index_meta_table,
                                                std::move(meta_tx_key),
                                                std::move(meta_record_ptr),
                                                txservice::OperationType::Update,
@@ -475,18 +464,12 @@ LogError LogObject::remove_log(const std::string &log_name,
         return LogError::INVALID_PARAMETER;
     }
 
-    // Create table name for log storage
-    txservice::TableName table_name_obj(std::string_view("log_table"),
-                                        txservice::TableType::Primary,
-                                        txservice::TableEngine::InternalHash);
-
     // Read metadata to get sequence ID range
     std::string meta_key = get_metadata_key(log_name);
-    txservice::EloqStringKey meta_key_obj(meta_key.data(), meta_key.size());
-    txservice::TxKey meta_tx_key(&meta_key_obj);
+    txservice::TxKey meta_tx_key = txservice::EloqStringKey::Create(meta_key.c_str(), meta_key.size());
 
     txservice::EloqStringRecord meta_record;
-    txservice::ReadTxRequest meta_read_req(&table_name_obj,
+    txservice::ReadTxRequest meta_read_req(&vector_index_meta_table,
                                            0,
                                            &meta_tx_key,
                                            &meta_record,
@@ -525,12 +508,11 @@ LogError LogObject::remove_log(const std::string &log_name,
          ++seq_id)
     {
         std::string item_key = get_log_item_key(log_name, seq_id);
-        txservice::EloqStringKey item_key_obj(item_key.data(), item_key.size());
-        txservice::TxKey item_tx_key(&item_key_obj);
+        txservice::TxKey item_tx_key = txservice::EloqStringKey::Create(item_key.c_str(), item_key.size());
 
         auto item_record_ptr = std::make_unique<txservice::EloqStringRecord>();
         txservice::UpsertTxRequest item_delete_req(
-            &table_name_obj,
+            &vector_index_meta_table,
             std::move(item_tx_key),
             std::move(item_record_ptr),
             txservice::OperationType::Delete,
@@ -547,7 +529,7 @@ LogError LogObject::remove_log(const std::string &log_name,
 
     // Delete metadata
     auto meta_record_ptr = std::make_unique<txservice::EloqStringRecord>();
-    txservice::UpsertTxRequest meta_delete_req(&table_name_obj,
+    txservice::UpsertTxRequest meta_delete_req(&vector_index_meta_table,
                                                std::move(meta_tx_key),
                                                std::move(meta_record_ptr),
                                                txservice::OperationType::Delete,
@@ -575,18 +557,12 @@ LogError LogObject::truncate_log(const std::string &log_name,
         return LogError::INVALID_PARAMETER;
     }
 
-    // Create table name for log storage
-    txservice::TableName table_name_obj(std::string_view("log_table"),
-                                        txservice::TableType::Primary,
-                                        txservice::TableEngine::InternalHash);
-
     // Read metadata to get sequence ID range
     std::string meta_key = get_metadata_key(log_name);
-    txservice::EloqStringKey meta_key_obj(meta_key.data(), meta_key.size());
-    txservice::TxKey meta_tx_key(&meta_key_obj);
+    txservice::TxKey meta_tx_key = txservice::EloqStringKey::Create(meta_key.c_str(), meta_key.size());
 
     txservice::EloqStringRecord meta_record;
-    txservice::ReadTxRequest meta_read_req(&table_name_obj,
+    txservice::ReadTxRequest meta_read_req(&vector_index_meta_table,
                                            0,
                                            &meta_tx_key,
                                            &meta_record,
@@ -634,12 +610,11 @@ LogError LogObject::truncate_log(const std::string &log_name,
          ++seq_id)
     {
         std::string item_key = get_log_item_key(log_name, seq_id);
-        txservice::EloqStringKey item_key_obj(item_key.data(), item_key.size());
-        txservice::TxKey item_tx_key(&item_key_obj);
+        txservice::TxKey item_tx_key = txservice::EloqStringKey::Create(item_key.c_str(), item_key.size());
 
         auto item_record_ptr = std::make_unique<txservice::EloqStringRecord>();
         txservice::UpsertTxRequest item_delete_req(
-            &table_name_obj,
+            &vector_index_meta_table,
             std::move(item_tx_key),
             std::move(item_record_ptr),
             txservice::OperationType::Delete,
@@ -666,7 +641,7 @@ LogError LogObject::truncate_log(const std::string &log_name,
     meta_record_ptr->SetEncodedBlob(
         reinterpret_cast<const unsigned char *>(serialized_meta.c_str()),
         serialized_meta.size());
-    txservice::UpsertTxRequest meta_upsert_req(&table_name_obj,
+    txservice::UpsertTxRequest meta_upsert_req(&vector_index_meta_table,
                                                std::move(meta_tx_key),
                                                std::move(meta_record_ptr),
                                                txservice::OperationType::Update,
@@ -696,18 +671,13 @@ LogError LogObject::scan_log(const std::string &log_name,
         return LogError::INVALID_PARAMETER;
     }
 
-    // Create table name for log storage
-    txservice::TableName table_name_obj(std::string_view("log_table"),
-                                        txservice::TableType::Primary,
-                                        txservice::TableEngine::InternalHash);
-
     // Read metadata to get sequence ID range
     std::string meta_key = get_metadata_key(log_name);
     txservice::EloqStringKey meta_key_obj(meta_key.data(), meta_key.size());
     txservice::TxKey meta_tx_key(&meta_key_obj);
 
     txservice::EloqStringRecord meta_record;
-    txservice::ReadTxRequest meta_read_req(&table_name_obj,
+    txservice::ReadTxRequest meta_read_req(&vector_index_meta_table,
                                            0,
                                            &meta_tx_key,
                                            &meta_record,
@@ -763,7 +733,7 @@ LogError LogObject::scan_log(const std::string &log_name,
                                        &scan_batch_records.back());
     }
 
-    txservice::BatchReadTxRequest batch_read_req(&table_name_obj,
+    txservice::BatchReadTxRequest batch_read_req(&vector_index_meta_table,
                                                  0,
                                                  scan_batch_tuples,
                                                  false,
@@ -796,18 +766,13 @@ LogError LogObject::scan_log(const std::string &log_name,
 log_metadata_t LogObject::get_stats(const std::string &log_name,
                                     txservice::TransactionExecution *txm)
 {
-    // Create table name for log storage
-    txservice::TableName table_name_obj(std::string_view("log_table"),
-                                        txservice::TableType::Primary,
-                                        txservice::TableEngine::InternalHash);
-
     // Read metadata to get sequence ID range
     std::string meta_key = get_metadata_key(log_name);
     txservice::EloqStringKey meta_key_obj(meta_key.data(), meta_key.size());
     txservice::TxKey meta_tx_key(&meta_key_obj);
 
     txservice::EloqStringRecord meta_record;
-    txservice::ReadTxRequest meta_read_req(&table_name_obj,
+    txservice::ReadTxRequest meta_read_req(&vector_index_meta_table,
                                            0,
                                            &meta_tx_key,
                                            &meta_record,
