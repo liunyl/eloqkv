@@ -78,8 +78,6 @@ bool HNSWVectorIndex::load(const std::string& path) {
         initialized_ = false;
         return false;
     }
-
-    return true;
 }
 
 bool HNSWVectorIndex::save(const std::string& path) {
@@ -285,6 +283,7 @@ IndexOpResult HNSWVectorIndex::search(
         return IndexOpResult(VectorOpResult::INDEX_INTERNAL_ERROR, e.what());
     }
 }
+
 
 /**
  * @brief Adds a single vector with the given identifier to the HNSW index.
