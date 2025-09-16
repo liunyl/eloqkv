@@ -90,7 +90,12 @@ public:
 
 private:
     std::string name_{""};
-    size_t dimension_{0};
+    /**
+ * Returns the dimensionality of the vector index.
+ *
+ * @return The number of dimensions for vectors stored in the index (0 if unset).
+ */
+size_t dimension_{0};
     Algorithm algorithm_{Algorithm::HNSW};
     DistanceMetric metric_{DistanceMetric::L2SQ};
     std::unordered_map<std::string, std::string> alg_params_;
@@ -103,11 +108,104 @@ private:
 };
 
 /**
- * @brief Handler class for vector operations
+ * @brief Singleton handler for vector index management and operations.
  *
- * This class provides methods for managing vector indices and
- * performing vector operations within the transaction system.
- * Uses singleton pattern for global access.
+ * Provides create/drop/info/search/Add/Update/Delete operations that execute
+ * within a transaction context and manage an internal thread-safe cache of
+ * VectorIndex instances.
+ */
+
+/**
+ * @brief Get the singleton instance of VectorHandler.
+ *
+ * @return Reference to the global VectorHandler instance.
+ */
+
+/**
+ * @brief Create a new vector index.
+ *
+ * @param idx_spec Configuration for the vector index to create.
+ * @return Result of the create operation.
+ */
+
+/**
+ * @brief Drop (delete) a vector index.
+ *
+ * @param name Name of the vector index to drop.
+ * @return Result of the drop operation.
+ */
+
+/**
+ * @brief Retrieve metadata for a vector index.
+ *
+ * @param name Name of the vector index to query.
+ * @param metadata (OUT) Receives the index metadata on success.
+ * @return Result of the info operation.
+ */
+
+/**
+ * @brief Search for nearest neighbors in a vector index.
+ *
+ * @param name Name of the vector index to search.
+ * @param query_vector Query vector to match against the index.
+ * @param k_count Number of nearest neighbors to return.
+ * @param search_params Search-time parameters that may override index algorithm parameters.
+ * @param vector_result (OUT) Populated with search hits on success.
+ * @return Result of the search operation.
+ */
+
+/**
+ * @brief Add a vector entry to an index.
+ *
+ * @param name Name of the target vector index.
+ * @param id Unique identifier for the vector entry.
+ * @param vector Vector components to store.
+ * @return Result of the add operation.
+ */
+
+/**
+ * @brief Update an existing vector entry in an index.
+ *
+ * @param name Name of the target vector index.
+ * @param id Unique identifier for the vector entry.
+ * @param vector New vector components to replace the existing entry.
+ * @return Result of the update operation.
+ */
+
+/**
+ * @brief Delete a vector entry from an index.
+ *
+ * @param name Name of the target vector index.
+ * @param id Unique identifier for the vector entry to remove.
+ * @return Result of the delete operation.
+ */
+
+/**
+ * @brief Get or create a VectorIndex instance from the internal cache.
+ *
+ * Retrieves a cached index if present and version-compatible; otherwise
+ * initializes a new index from the provided record. The function may apply
+ * search_params to override stored algorithm parameters.
+ *
+ * @param name Index name.
+ * @param h_record Record containing encoded index metadata used for initialization.
+ * @param index_version Current index version from storage.
+ * @param search_params Search-time parameters that may override stored algorithm parameters.
+ * @param index_ptr (OUT) Set to the resolved VectorIndex pointer on success.
+ * @return Result of the operation.
+ */
+
+/**
+ * @brief Initialize a VectorIndex instance from stored metadata.
+ *
+ * Uses the provided record and optional search_params overrides to configure
+ * and bring an existing VectorIndex instance into a usable state.
+ *
+ * @param index_ptr Pointer to the VectorIndex to initialize.
+ * @param h_record Record containing encoded index metadata.
+ * @param index_version Current index version from storage.
+ * @param search_params Parameters that may override stored algorithm parameters.
+ * @return Result of the initialization.
  */
 class VectorHandler
 {

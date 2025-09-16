@@ -216,6 +216,19 @@ VectorHandler &VectorHandler::Instance()
     return instance;
 }
 
+/**
+ * @brief Create a new vector index metadata entry and prepare an in-memory index placeholder.
+ *
+ * Attempts to insert index metadata for the index described by idx_spec into the internal
+ * metadata table. If insertion succeeds, creates and caches an uninitialized in-memory
+ * HNSWVectorIndex instance (version 0) for later initialization/loading.
+ *
+ * @param idx_spec Configuration for the index to create (name, dimension, algorithm, metric, params, etc.).
+ * @return VectorOpResult
+ *   - SUCCEED: metadata inserted and in-memory index placeholder created.
+ *   - INDEX_EXISTED: an index with the same name already exists (metadata status Normal).
+ *   - INDEX_META_OP_FAILED: an error occurred while reading or upserting metadata.
+ */
 VectorOpResult VectorHandler::Create(const IndexConfig &idx_spec,
                                      txservice::TransactionExecution *txm)
 {
@@ -282,6 +295,30 @@ VectorOpResult VectorHandler::Create(const IndexConfig &idx_spec,
     return VectorOpResult::SUCCEED;
 }
 
+/**
+ * @brief Removes a vector index and its metadata.
+ *
+ * Deletes the index metadata entry from the internal metadata table, removes the
+ * in-memory cached index, and attempts to delete the on-disk index file (if
+ * present). The function reads and decodes the stored metadata first to obtain
+ * the on-disk file path, performs a transactional delete of the metadata, and
+ * then evicts the index from the in-memory cache and removes the file from
+ * disk.
+ *
+ * Behavior and error conditions:
+ * - Returns INDEX_NOT_EXIST if the metadata read indicates the index is deleted
+ *   or absent.
+ * - Returns INDEX_META_OP_FAILED if reading or upserting (deleting) the metadata
+ *   entry fails.
+ * - On successful metadata deletion returns SUCCEED. Filesystem deletion errors
+ *   are logged as warnings and do not change the returned success status.
+ *
+ * Side effects:
+ * - Removes the metadata entry from the internal metadata table via a
+ *   transactional upsert(Delete).
+ * - Erases the corresponding entry from the in-memory index cache.
+ * - Attempts to remove the physical index file referenced by the metadata.
+ */
 VectorOpResult VectorHandler::Drop(const std::string &name,
                                    txservice::TransactionExecution *txm)
 {
@@ -411,6 +448,25 @@ VectorOpResult VectorHandler::Info(const std::string &name,
     return VectorOpResult::SUCCEED;
 }
 
+/**
+ * @brief Execute a k-nearest-neighbors search against a named vector index.
+ *
+ * Verifies the index exists by reading its metadata, obtains or initializes the
+ * in-memory index (creating and loading it if needed), and runs a nearest-neighbor
+ * search using the provided query vector.
+ *
+ * On success, populates `vector_result` with up to `k_count` nearest entries and
+ * returns VectorOpResult::SUCCEED. If metadata cannot be read, the index is
+ * missing, or index initialization/search fails, an appropriate non-success
+ * VectorOpResult is returned.
+ *
+ * @param name Index name to search.
+ * @param query_vector Query vector used for nearest-neighbor retrieval.
+ * @param k_count Maximum number of nearest neighbors to return.
+ * @param search_params Optional parameters that can influence index initialization/search.
+ * @param txm Transaction execution context used to read index metadata. (service client — no further description)
+ * @param[out] vector_result Receives the search results when the call succeeds.
+ */
 VectorOpResult VectorHandler::Search(
     const std::string &name,
     const std::vector<float> &query_vector,
@@ -469,6 +525,27 @@ VectorOpResult VectorHandler::Search(
     return VectorOpResult::SUCCEED;
 }
 
+/**
+ * @brief Adds a vector with a given id to the named vector index.
+ *
+ * Attempts to validate that the index exists, obtains or initializes the in-memory
+ * index instance for the specified index version, and inserts the provided vector
+ * under the given id.
+ *
+ * The provided vector must match the index's configured dimensionality. The function
+ * returns a VectorOpResult describing the outcome:
+ * - SUCCEED: vector was added successfully.
+ * - INDEX_NOT_EXIST: the named index does not exist.
+ * - INDEX_META_OP_FAILED: failure reading index metadata.
+ * - INDEX_ADD_FAILED: index instance rejected the add operation.
+ *
+ * @param name Index name.
+ * @param id   Numeric identifier to associate with the vector.
+ * @param vector Dense vector to insert; dimensionality must match the index.
+ *
+ * Note: The `txm` transaction execution pointer is a transaction/service parameter
+ * and is intentionally not documented here.
+ */
 VectorOpResult VectorHandler::Add(const std::string &name,
                                   uint64_t id,
                                   const std::vector<float> &vector,
@@ -528,6 +605,24 @@ VectorOpResult VectorHandler::Add(const std::string &name,
     return VectorOpResult::SUCCEED;
 }
 
+/**
+ * @brief Update an existing vector in the named vector index.
+ *
+ * Reads index metadata, ensures the index exists (initializing or loading the in-memory index if needed),
+ * and updates the stored vector for the given id in that index.
+ *
+ * @param name Name of the vector index to update.
+ * @param id Identifier of the vector to update.
+ * @param vector New feature vector to store for the given id.
+ * @param txm Transaction execution context used to read index metadata. (Client/service parameter — omitted from @param list per project convention.)
+ *
+ * @return VectorOpResult indicating the operation outcome:
+ *         - SUCCEED on successful update.
+ *         - INDEX_NOT_EXIST if the index metadata indicates the index is absent.
+ *         - INDEX_META_OP_FAILED if reading index metadata failed.
+ *         - INDEX_UPDATE_FAILED if the index update operation failed.
+ *         - Any error returned by GetOrCreateIndex (e.g., initialization/load failures).
+ */
 VectorOpResult VectorHandler::Update(const std::string &name,
                                      uint64_t id,
                                      const std::vector<float> &vector,
@@ -587,6 +682,25 @@ VectorOpResult VectorHandler::Update(const std::string &name,
     return VectorOpResult::SUCCEED;
 }
 
+/**
+ * @brief Remove a vector entry from a named index.
+ *
+ * Reads the index metadata to validate the index exists, ensures an
+ * in-memory index instance is available (creating/initializing it if
+ * necessary), and removes the vector identified by `id` from that index.
+ *
+ * The function returns a VectorOpResult indicating success or a specific
+ * failure reason:
+ * - SUCCEED: vector was removed successfully.
+ * - INDEX_META_OP_FAILED: internal metadata read operation failed.
+ * - INDEX_NOT_EXIST: the named index does not exist or is marked deleted.
+ * - INDEX_DELETE_FAILED: the in-memory index failed to remove the given id.
+ *
+ * @param name Name of the vector index.
+ * @param id   Identifier of the vector to remove.
+ * @param txm  TransactionExecution used for internal metadata reads (omitted from param
+ *             documentation as a general transaction service).
+ */
 VectorOpResult VectorHandler::Delete(const std::string &name,
                                      uint64_t id,
                                      txservice::TransactionExecution *txm)
@@ -645,6 +759,23 @@ VectorOpResult VectorHandler::Delete(const std::string &name,
     return VectorOpResult::SUCCEED;
 }
 
+/**
+ * @brief Retrieve a cached VectorIndex matching the requested version or create and initialize one.
+ *
+ * Checks the in-memory index cache under a shared lock and returns the cached index when its version
+ * matches index_version. If the index is absent or uninitialized, acquires an exclusive lock,
+ * performs a double-checked creation and initialization of an HNSWVectorIndex, loads it from storage,
+ * updates the cached version, and returns the initialized pointer.
+ *
+ * @param name Index name.
+ * @param h_record Transaction record containing the stored index metadata used for initialization.
+ * @param index_version Expected metadata version for the index (must be > 0).
+ * @param search_params Parameters used to override or augment the index configuration during initialization.
+ * @param index_ptr Output parameter set to the initialized VectorIndex on success.
+ * @return VectorOpResult SUCCEED on success; INDEX_VERSION_MISMATCH if a cached index has a different
+ *         version; other error codes (e.g. INDEX_INIT_FAILED, INDEX_LOAD_FAILED) if initialization or
+ *         loading fails.
+ */
 VectorOpResult VectorHandler::GetOrCreateIndex(
     const std::string &name,
     const txservice::TxRecord::Uptr &h_record,
@@ -724,6 +855,22 @@ VectorOpResult VectorHandler::GetOrCreateIndex(
     }
 }
 
+/**
+ * @brief Initialize and load a vector index instance from stored metadata.
+ *
+ * Decodes index metadata from the provided transaction record, builds an IndexConfig
+ * (applying any overrides from search_params), calls the index' initialize method,
+ * and then loads on-disk data from the metadata's file path.
+ *
+ * @param index_ptr Pointer to the VectorIndex instance to initialize; must be non-null.
+ * @param h_record Transaction record containing the encoded index metadata blob.
+ * @param index_version Version used when decoding the stored metadata.
+ * @param search_params Parameters that override or augment the index's algorithm parameters.
+ *
+ * @return VectorOpResult::SUCCEED on successful initialization and load.
+ * @return VectorOpResult::INDEX_INIT_FAILED if `index_ptr` is null or index_ptr->initialize(...) fails.
+ * @return VectorOpResult::INDEX_LOAD_FAILED if index_ptr->load(...) fails.
+ */
 VectorOpResult VectorHandler::InitializeIndex(
     VectorIndex *index_ptr,
     const txservice::TxRecord::Uptr &h_record,
