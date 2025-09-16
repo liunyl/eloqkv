@@ -16,9 +16,11 @@
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "eloq_string_key_record.h"
 #include "tx_execution.h"
+#include "tx_service.h"
 #include "vector_index.h"
 #include "vector_type.h"
 
@@ -113,31 +115,35 @@ class VectorHandler
 {
 public:
     /**
+     * @brief Initialize the handler instance
+     *
+     * @param tx_service Transaction service
+     */
+    static void InitHandlerInstance(txservice::TxService *tx_service);
+    /**
      * @brief Get the singleton instance of VectorHandler
      *
      * @return Reference to the singleton VectorHandler instance
      */
     static VectorHandler &Instance();
 
+    ~VectorHandler() = default;
+
     /**
      * @brief Create a new vector index
      *
      * @param idx_spec Configuration for the vector index to create
-     * @param txm Transaction execution context
      * @return Result of the create operation
      */
-    VectorOpResult Create(const IndexConfig &idx_spec,
-                          txservice::TransactionExecution *txm);
+    VectorOpResult Create(const IndexConfig &idx_spec);
 
     /**
      * @brief Drop (delete) a vector index
      *
      * @param name Name of the vector index to drop
-     * @param txm Transaction execution context
      * @return Result of the drop operation
      */
-    VectorOpResult Drop(const std::string &name,
-                        txservice::TransactionExecution *txm);
+    VectorOpResult Drop(const std::string &name);
 
     /**
      * @brief Get information about a vector index
@@ -157,18 +163,15 @@ public:
      * @param name Name of the vector index to search
      * @param query_vector Query vector
      * @param k_count Number of nearest neighbors to return
-     * @param search_params Search parameters
      * @param txm Transaction execution context
      * @param vector_result (OUT) Result of the search vectors
      * @return Result of the search operation
      */
-    VectorOpResult Search(
-        const std::string &name,
-        const std::vector<float> &query_vector,
-        size_t k_count,
-        const std::unordered_map<std::string, std::string> &search_params,
-        txservice::TransactionExecution *txm,
-        SearchResult &vector_result);
+    VectorOpResult Search(const std::string &name,
+                          const std::vector<float> &query_vector,
+                          size_t k_count,
+                          txservice::TransactionExecution *txm,
+                          SearchResult &vector_result);
 
     /**
      * @brief Add a vector entry to an index
@@ -212,8 +215,10 @@ public:
 
 private:
     // Private constructor to prevent instantiation
-    VectorHandler() = default;
-    ~VectorHandler() = default;
+    explicit VectorHandler(txservice::TxService *tx_service)
+        : tx_service_(tx_service)
+    {
+    }
 
     // Delete copy and move constructors/operators
     VectorHandler(const VectorHandler &) = delete;
@@ -230,37 +235,31 @@ private:
      * @param name Index name
      * @param h_record Record containing encoded metadata
      * @param index_version Current index version from storage
-     * @param search_params Search parameters to override alg_params
-     * @param index_ptr (OUT) Pointer to the vector index
-     * @return Result of the operation
+     * @return Pair of the vector index and the result of the operation
      */
-    VectorOpResult GetOrCreateIndex(
+    std::pair<std::shared_ptr<VectorIndex>, VectorOpResult> GetOrCreateIndex(
         const std::string &name,
         const txservice::TxRecord::Uptr &h_record,
-        uint64_t index_version,
-        const std::unordered_map<std::string, std::string> &search_params,
-        VectorIndex *&index_ptr);
+        uint64_t index_version);
 
     /**
-     * @brief Initialize a vector index with given configuration
+     * @brief Create a vector index with given configuration and initialize it
      *
-     * @param index_ptr Pointer to the vector index to initialize
      * @param h_record Record containing encoded metadata
      * @param index_version Current index version from storage
-     * @param search_params Search parameters to override alg_params
-     * @return Result of the initialization
+     * @return Pair of the vector index and the result of the operation
      */
-    VectorOpResult InitializeIndex(
-        VectorIndex *index_ptr,
-        const txservice::TxRecord::Uptr &h_record,
-        uint64_t index_version,
-        const std::unordered_map<std::string, std::string> &search_params);
+    std::pair<std::shared_ptr<VectorIndex>, VectorOpResult>
+    CreateAndInitializeIndex(const txservice::TxRecord::Uptr &h_record,
+                             uint64_t index_version);
 
+    // Transaction service
+    txservice::TxService *tx_service_{nullptr};
     // Vector index cache with thread safety
     mutable std::shared_mutex vec_indexes_mutex_;
     // map of index name to index version and index object
     std::unordered_map<std::string,
-                       std::pair<uint64_t, std::unique_ptr<VectorIndex>>>
+                       std::pair<uint64_t, std::shared_ptr<VectorIndex>>>
         vec_indexes_;
 };
 
