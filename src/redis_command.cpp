@@ -254,6 +254,11 @@ const std::vector<std::pair<const char *, RedisCommandType>> command_types{{
     {"punsubscribe", RedisCommandType::PUNSUBSCRIBE},
     {"eloqvec.create", RedisCommandType::ELOQVEC_CREATE},
     {"eloqvec.info", RedisCommandType::ELOQVEC_INFO},
+    {"eloqvec.drop", RedisCommandType::ELOQVEC_DROP},
+    {"eloqvec.add", RedisCommandType::ELOQVEC_ADD},
+    {"eloqvec.update", RedisCommandType::ELOQVEC_UPDATE},
+    {"eloqvec.delete", RedisCommandType::ELOQVEC_DELETE},
+    {"eloqvec.search", RedisCommandType::ELOQVEC_SEARCH},
 }};
 
 /*
@@ -19989,6 +19994,32 @@ std::tuple<bool, InfoVecIndexCommand> ParseInfoVecIndexCommand(
     return {true, InfoVecIndexCommand(index_name)};
 }
 
+std::tuple<bool, DropVecIndexCommand> ParseDropVecIndexCommand(
+    const std::vector<std::string_view> &args, OutputHandler *output)
+{
+    assert(args[0] == "eloqvec.drop" || args[0] == "ELOQVEC.DROP");
+
+    // ELOQVEC.DROP <index_name>
+    if (args.size() != 2)
+    {
+        output->OnError(
+            "ERR wrong number of arguments for 'eloqvec.drop' command");
+        return {false, DropVecIndexCommand()};
+    }
+
+    std::string_view index_name = args[1];
+
+    // Validate index name is not empty
+    if (index_name.empty())
+    {
+        output->OnError("ERR index name cannot be empty");
+        return {false, DropVecIndexCommand()};
+    }
+
+    // Create command with parsed parameter
+    return {true, DropVecIndexCommand(index_name)};
+}
+
 bool InfoVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
                                   RedisConnectionContext *ctx,
                                   const txservice::TableName *table,
@@ -20035,6 +20066,429 @@ void InfoVecIndexCommand::OutputResult(OutputHandler *reply,
         reply->OnString(std::to_string(metadata_.CreatedTs()));
         reply->OnString("last_persist_ts");
         reply->OnString(std::to_string(metadata_.LastPersistTs()));
+        reply->OnArrayEnd();
+    }
+    else
+    {
+        reply->OnError(redis_get_error_messages(result_.err_code_));
+    }
+}
+
+bool DropVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
+                                  RedisConnectionContext *ctx,
+                                  const txservice::TableName *table,
+                                  txservice::TransactionExecution *txm,
+                                  OutputHandler *output,
+                                  bool auto_commit)
+{
+    return redis_impl->ExecuteCommand(
+        ctx, txm, table, this, output, auto_commit);
+}
+
+void DropVecIndexCommand::OutputResult(OutputHandler *reply,
+                                       RedisConnectionContext *ctx) const
+{
+    // Output the result of the drop operation
+    if (result_.err_code_ == RD_OK)
+    {
+        reply->OnString("OK");
+    }
+    else
+    {
+        reply->OnError(redis_get_error_messages(result_.err_code_));
+    }
+}
+
+std::tuple<bool, AddVecIndexCommand> ParseAddVecIndexCommand(
+    const std::vector<std::string_view> &args, OutputHandler *output)
+{
+    assert(args[0] == "eloqvec.add" || args[0] == "ELOQVEC.ADD");
+
+    // ELOQVEC.ADD <index_name> <key> <vector_data>
+    // vector_data should be a space-separated list of float values
+    if (args.size() < 4)
+    {
+        output->OnError(
+            "ERR wrong number of arguments for 'eloqvec.add' command");
+        return {false, AddVecIndexCommand()};
+    }
+
+    std::string_view index_name = args[1];
+    std::string_view key_str = args[2];
+
+    // Validate index name is not empty
+    if (index_name.empty())
+    {
+        output->OnError("ERR index name cannot be empty");
+        return {false, AddVecIndexCommand()};
+    }
+
+    // Parse key as uint64_t
+    uint64_t key;
+    if (!string2ull(key_str.data(), key_str.size(), key))
+    {
+        output->OnError("ERR key must be a valid integer");
+        return {false, AddVecIndexCommand()};
+    }
+
+    // Parse vector data (remaining arguments should be float values)
+    std::vector<float> vector_data;
+    vector_data.reserve(args.size() - 3);
+
+    for (size_t i = 3; i < args.size(); ++i)
+    {
+        float val;
+        if (!string2float(args[i].data(), args[i].size(), val))
+        {
+            output->OnError("ERR vector data must contain valid float values");
+            return {false, AddVecIndexCommand()};
+        }
+        vector_data.push_back(val);
+    }
+
+    // Validate vector is not empty
+    if (vector_data.empty())
+    {
+        output->OnError("ERR vector data cannot be empty");
+        return {false, AddVecIndexCommand()};
+    }
+
+    // Create command with parsed parameters
+    return {true, AddVecIndexCommand(index_name, key, std::move(vector_data))};
+}
+
+bool AddVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
+                                 RedisConnectionContext *ctx,
+                                 const txservice::TableName *table,
+                                 txservice::TransactionExecution *txm,
+                                 OutputHandler *output,
+                                 bool auto_commit)
+{
+    return redis_impl->ExecuteCommand(
+        ctx, txm, table, this, output, auto_commit);
+}
+
+void AddVecIndexCommand::OutputResult(OutputHandler *reply,
+                                      RedisConnectionContext *ctx) const
+{
+    // Output the result of the add operation
+    if (result_.err_code_ == RD_OK)
+    {
+        reply->OnString("OK");
+    }
+    else
+    {
+        reply->OnError(redis_get_error_messages(result_.err_code_));
+    }
+}
+
+std::tuple<bool, UpdateVecIndexCommand> ParseUpdateVecIndexCommand(
+    const std::vector<std::string_view> &args, OutputHandler *output)
+{
+    assert(args[0] == "eloqvec.update" || args[0] == "ELOQVEC.UPDATE");
+
+    // ELOQVEC.UPDATE <index_name> <key> <vector_data> [PARAMS <param_name>
+    // <param_value> ...] Minimum required parameters: ELOQVEC.UPDATE
+    // <index_name> <key> <vector_data>
+    if (args.size() < 4)
+    {
+        output->OnError(
+            "ERR wrong number of arguments for 'eloqvec.update' command");
+        return {false, UpdateVecIndexCommand()};
+    }
+
+    std::string_view index_name = args[1];
+    std::string_view key_str = args[2];
+
+    // Validate index name is not empty
+    if (index_name.empty())
+    {
+        output->OnError("ERR index name cannot be empty");
+        return {false, UpdateVecIndexCommand()};
+    }
+
+    // Parse key as uint64_t
+    uint64_t key;
+    if (!string2ull(key_str.data(), key_str.size(), key))
+    {
+        output->OnError("ERR key must be a valid integer");
+        return {false, UpdateVecIndexCommand()};
+    }
+
+    // Parse vector data and optional parameters
+    std::vector<float> vector_data;
+    std::unordered_map<std::string, std::string> update_params;
+
+    size_t i = 3;
+    bool parsing_vector = true;
+
+    // Parse vector data (until we hit PARAMS keyword or end of args)
+    while (i < args.size())
+    {
+        if (args[i] == "PARAMS" || args[i] == "params")
+        {
+            parsing_vector = false;
+            i++;  // Skip PARAMS keyword
+            break;
+        }
+
+        if (parsing_vector)
+        {
+            float val;
+            if (!string2float(args[i].data(), args[i].size(), val))
+            {
+                output->OnError(
+                    "ERR vector data must contain valid float values");
+                return {false, UpdateVecIndexCommand()};
+            }
+            vector_data.push_back(val);
+        }
+        i++;
+    }
+
+    // Validate vector is not empty
+    if (vector_data.empty())
+    {
+        output->OnError("ERR vector data cannot be empty");
+        return {false, UpdateVecIndexCommand()};
+    }
+
+    // Parse optional parameters (key-value pairs)
+    if (!parsing_vector && i < args.size())
+    {
+        if ((args.size() - i) % 2 != 0)
+        {
+            output->OnError("ERR parameters must be key-value pairs");
+            return {false, UpdateVecIndexCommand()};
+        }
+
+        while (i < args.size())
+        {
+            std::string param_name(args[i]);
+            std::string param_value(args[i + 1]);
+            update_params[param_name] = param_value;
+            i += 2;
+        }
+    }
+
+    // Create command with parsed parameters
+    return {
+        true,
+        UpdateVecIndexCommand(
+            index_name, key, std::move(vector_data), std::move(update_params))};
+}
+
+bool UpdateVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
+                                    RedisConnectionContext *ctx,
+                                    const txservice::TableName *table,
+                                    txservice::TransactionExecution *txm,
+                                    OutputHandler *output,
+                                    bool auto_commit)
+{
+    return redis_impl->ExecuteCommand(
+        ctx, txm, table, this, output, auto_commit);
+}
+
+void UpdateVecIndexCommand::OutputResult(OutputHandler *reply,
+                                         RedisConnectionContext *ctx) const
+{
+    // Output the result of the update operation
+    if (result_.err_code_ == RD_OK)
+    {
+        reply->OnString("OK");
+    }
+    else
+    {
+        reply->OnError(redis_get_error_messages(result_.err_code_));
+    }
+}
+
+std::tuple<bool, DeleteVecIndexCommand> ParseDeleteVecIndexCommand(
+    const std::vector<std::string_view> &args, OutputHandler *output)
+{
+    assert(args[0] == "eloqvec.delete" || args[0] == "ELOQVEC.DELETE");
+
+    // ELOQVEC.DELETE <index_name> <key>
+    if (args.size() != 3)
+    {
+        output->OnError(
+            "ERR wrong number of arguments for 'eloqvec.delete' command");
+        return {false, DeleteVecIndexCommand()};
+    }
+
+    std::string_view index_name = args[1];
+    std::string_view key_str = args[2];
+
+    // Validate index name is not empty
+    if (index_name.empty())
+    {
+        output->OnError("ERR index name cannot be empty");
+        return {false, DeleteVecIndexCommand()};
+    }
+
+    // Parse key as uint64_t
+    uint64_t key;
+    if (!string2ull(key_str.data(), key_str.size(), key))
+    {
+        output->OnError("ERR key must be a valid integer");
+        return {false, DeleteVecIndexCommand()};
+    }
+
+    // Create command with parsed parameters
+    return {true, DeleteVecIndexCommand(index_name, key)};
+}
+
+bool DeleteVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
+                                    RedisConnectionContext *ctx,
+                                    const txservice::TableName *table,
+                                    txservice::TransactionExecution *txm,
+                                    OutputHandler *output,
+                                    bool auto_commit)
+{
+    return redis_impl->ExecuteCommand(
+        ctx, txm, table, this, output, auto_commit);
+}
+
+void DeleteVecIndexCommand::OutputResult(OutputHandler *reply,
+                                         RedisConnectionContext *ctx) const
+{
+    // Output the result of the delete operation
+    if (result_.err_code_ == RD_OK)
+    {
+        reply->OnString("OK");
+    }
+    else
+    {
+        reply->OnError(redis_get_error_messages(result_.err_code_));
+    }
+}
+
+std::tuple<bool, SearchVecIndexCommand> ParseSearchVecIndexCommand(
+    const std::vector<std::string_view> &args, OutputHandler *output)
+{
+    assert(args[0] == "eloqvec.search" || args[0] == "ELOQVEC.SEARCH");
+
+    // ELOQVEC.SEARCH <index_name> <k_count> <vector_data> [PARAMS <param_name>
+    // <param_value> ...] Minimum required parameters: ELOQVEC.SEARCH
+    // <index_name> <k_count> <vector_data>
+    if (args.size() < 4)
+    {
+        output->OnError(
+            "ERR wrong number of arguments for 'eloqvec.search' command");
+        return {false, SearchVecIndexCommand()};
+    }
+
+    std::string_view index_name = args[1];
+    std::string_view k_count_str = args[2];
+
+    // Validate index name is not empty
+    if (index_name.empty())
+    {
+        output->OnError("ERR index name cannot be empty");
+        return {false, SearchVecIndexCommand()};
+    }
+
+    // Parse k_count as size_t
+    size_t k_count;
+    if (!string2ull(k_count_str.data(), k_count_str.size(), k_count))
+    {
+        output->OnError("ERR k_count must be a valid integer");
+        return {false, SearchVecIndexCommand()};
+    }
+
+    // Parse vector data and optional parameters
+    std::vector<float> vector_data;
+    std::unordered_map<std::string, std::string> search_params;
+
+    size_t i = 3;
+    bool parsing_vector = true;
+
+    // Parse vector data (until we hit PARAMS keyword or end of args)
+    while (i < args.size())
+    {
+        if (args[i] == "PARAMS" || args[i] == "params")
+        {
+            parsing_vector = false;
+            i++;  // Skip PARAMS keyword
+            break;
+        }
+
+        if (parsing_vector)
+        {
+            float val;
+            if (!string2float(args[i].data(), args[i].size(), val))
+            {
+                output->OnError(
+                    "ERR vector data must contain valid float values");
+                return {false, SearchVecIndexCommand()};
+            }
+            vector_data.push_back(val);
+        }
+        i++;
+    }
+
+    // Validate vector is not empty
+    if (vector_data.empty())
+    {
+        output->OnError("ERR vector data cannot be empty");
+        return {false, SearchVecIndexCommand()};
+    }
+
+    // Parse optional parameters (key-value pairs)
+    if (!parsing_vector && i < args.size())
+    {
+        if ((args.size() - i) % 2 != 0)
+        {
+            output->OnError("ERR parameters must be key-value pairs");
+            return {false, SearchVecIndexCommand()};
+        }
+
+        while (i < args.size())
+        {
+            std::string param_name(args[i]);
+            std::string param_value(args[i + 1]);
+            search_params[param_name] = param_value;
+            i += 2;
+        }
+    }
+
+    // Create command with parsed parameters
+    return {true,
+            SearchVecIndexCommand(index_name,
+                                  std::move(vector_data),
+                                  k_count,
+                                  std::move(search_params))};
+}
+
+bool SearchVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
+                                    RedisConnectionContext *ctx,
+                                    const txservice::TableName *table,
+                                    txservice::TransactionExecution *txm,
+                                    OutputHandler *output,
+                                    bool auto_commit)
+{
+    return redis_impl->ExecuteCommand(
+        ctx, txm, table, this, output, auto_commit);
+}
+
+void SearchVecIndexCommand::OutputResult(OutputHandler *reply,
+                                         RedisConnectionContext *ctx) const
+{
+    // Output the result of the search operation
+    if (result_.err_code_ == RD_OK)
+    {
+        // Output search results as an array
+        reply->OnArrayStart(search_res_.ids.size());
+
+        for (size_t i = 0; i < search_res_.ids.size(); ++i)
+        {
+            // Each result is an array of [id, distance]
+            reply->OnArrayStart(2);
+            reply->OnInt(search_res_.ids[i]);
+            reply->OnString(std::to_string(search_res_.distances[i]));
+            reply->OnArrayEnd();
+        }
+
         reply->OnArrayEnd();
     }
     else

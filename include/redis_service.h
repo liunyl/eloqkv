@@ -402,6 +402,41 @@ public:
                         OutputHandler *output,
                         bool auto_commit);
 
+    bool ExecuteCommand(RedisConnectionContext *ctx,
+                        TransactionExecution *txm,
+                        const TableName *table,
+                        DropVecIndexCommand *cmd,
+                        OutputHandler *output,
+                        bool auto_commit);
+
+    bool ExecuteCommand(RedisConnectionContext *ctx,
+                        TransactionExecution *txm,
+                        const TableName *table,
+                        AddVecIndexCommand *cmd,
+                        OutputHandler *output,
+                        bool auto_commit);
+
+    bool ExecuteCommand(RedisConnectionContext *ctx,
+                        TransactionExecution *txm,
+                        const TableName *table,
+                        UpdateVecIndexCommand *cmd,
+                        OutputHandler *output,
+                        bool auto_commit);
+
+    bool ExecuteCommand(RedisConnectionContext *ctx,
+                        TransactionExecution *txm,
+                        const TableName *table,
+                        DeleteVecIndexCommand *cmd,
+                        OutputHandler *output,
+                        bool auto_commit);
+
+    bool ExecuteCommand(RedisConnectionContext *ctx,
+                        TransactionExecution *txm,
+                        const TableName *table,
+                        SearchVecIndexCommand *cmd,
+                        OutputHandler *output,
+                        bool auto_commit);
+
 #ifdef WITH_FAULT_INJECT
     bool ExecuteCommand(RedisConnectionContext *ctx,
                         TransactionExecution *txm,
