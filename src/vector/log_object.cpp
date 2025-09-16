@@ -22,7 +22,20 @@
 namespace EloqVec
 {
 
-// Helper functions that don't need transaction execution context
+/**
+ * @brief Serialize log metadata into a byte string.
+ *
+ * Appends the four metadata fields (total_items, head_item_sequence_id,
+ * tail_item_sequence_id, next_id) to `result` in that order as raw
+ * uint64_t bytes. `result` is appended to (not cleared) and the function
+ * reserves the required space before appending.
+ *
+ * Note: Serialization uses the host's uint64_t representation (no canonical
+ * endianness conversion).
+ *
+ * @param meta Metadata to serialize.
+ * @param[out] result Byte string to which serialized metadata is appended.
+ */
 
 void LogObject::serialize_metadata(const log_metadata_t &meta,
                                    std::string &result)
@@ -49,6 +62,19 @@ void LogObject::serialize_metadata(const log_metadata_t &meta,
     return;
 }
 
+/**
+ * @brief Deserialize log metadata from a byte buffer.
+ *
+ * Reads up to four uint64_t fields from the provided buffer in the following
+ * order: total_items, head_item_sequence_id, tail_item_sequence_id, next_id.
+ * Each field is only populated if the buffer contains enough bytes; any
+ * missing fields remain at their default-constructed values.
+ *
+ * @param data Pointer to the serialized metadata bytes.
+ * @param data_size Size of the buffer pointed to by `data`.
+ * @return log_metadata_t Populated metadata struct (fields absent from the
+ * buffer remain default-initialized).
+ */
 log_metadata_t LogObject::deserialize_metadata(const char *data,
                                                size_t data_size)
 {
@@ -188,22 +214,17 @@ std::string LogObject::get_log_item_key(const std::string &log_name,
 }
 
 /**
- * @brief Creates a new log metadata record for the named log.
+ * @brief Create a new log metadata record for the given log name.
  *
- * Ensures a transaction execution context is provided, verifies the log does
+ * Ensures a transaction execution context is available, verifies the log does
  * not already exist, and inserts an initial zeroed metadata record into
  * storage.
  *
  * @param log_name Name of the log to create.
- * @note The transaction execution pointer parameter is a service/client and is
- * not documented here.
- *
- * @return LogError::INVALID_PARAMETER if the transaction execution context is
- * null.
- * @return LogError::LOG_ALREADY_EXISTS if metadata for the given log_name
- * already exists.
+ * @return LogError::INVALID_PARAMETER if the transaction execution context is null.
+ * @return LogError::LOG_ALREADY_EXISTS if metadata for the given log_name already exists.
  * @return LogError::STORAGE_ERROR on underlying storage/read/upsert failures.
- * @return LogError::SUCCESS on successful creation.
+ * @return LogError::SUCCESS when the metadata record is created successfully.
  */
 
 LogError LogObject::create_log(const std::string &log_name,
@@ -295,11 +316,12 @@ LogError LogObject::create_log(const std::string &log_name,
 }
 
 /**
- * @brief Checks whether a log with the given name exists in storage.
+ * @brief Returns whether a log with the given name exists in storage.
  *
- * Queries the metadata record for the named log and returns true if the record
- * is present with status `Normal`. Returns false if the record is missing or
- * if a storage/read error occurs.
+ * Checks the log metadata record and returns true only when the record is present
+ * and its status is txservice::RecordStatus::Normal. Returns false if the record
+ * is missing or if a storage/read error occurs. Requires a non-null transaction
+ * execution context (txm) bound via txm->Execute.
  *
  * @param log_name Name of the log to check.
  * @return true if the log metadata exists and is `Normal`; false otherwise.
@@ -343,27 +365,23 @@ bool LogObject::exists(const std::string &log_name,
 }
 
 /**
- * @brief Appends one or more log items to the named log.
+ * @brief Append one or more items to the named log, assigning consecutive sequence IDs.
  *
- * Assigns consecutive sequence IDs to the provided items (starting at the log's
- * current next_id), persists each item and updates the log metadata
- * (total_items, next_id, tail_item_sequence_id). Requires an active transaction
- * execution context.
+ * Appends the provided items to the log identified by log_name. Each item in
+ * items is assigned a sequence_id in-place, starting from the log's current
+ * next_id, and persisted. On success, log_id is set to the sequence_id of the
+ * last appended item and log_count is set to the updated total number of
+ * items in the log. Requires a valid transaction execution context.
  *
  * @param log_name Name of the log to append to.
- * @param items Vector of log items to append; each item's sequence_id will be
- * set in-place.
- * @param[out] log_id Set to the sequence_id of the last appended item on
- * success.
- * @param[out] log_count Set to the updated total number of items in the log on
- * success.
+ * @param items Vector of log items to append; each item's sequence_id is set in-place.
+ * @param[out] log_id Sequence ID of the last appended item on success.
+ * @param[out] log_count Updated total number of items in the log on success.
  *
- * @return LogError::INVALID_PARAMETER if the transaction execution pointer is
- * null.
+ * @return LogError::INVALID_PARAMETER if the transaction execution pointer is null.
  * @return LogError::LOG_NOT_FOUND if the log metadata does not exist.
  * @return LogError::STORAGE_ERROR on any storage read/write failure.
- * @return LogError::SUCCESS if items were appended (or if the input vector is
- * empty).
+ * @return LogError::SUCCESS if items were appended, or if the input vector is empty.
  */
 LogError LogObject::append_log(const std::string &log_name,
                                std::vector<log_item_t> &items,
@@ -610,24 +628,26 @@ LogError LogObject::remove_log(const std::string &log_name,
 }
 
 /**
- * @brief Truncates a log by deleting log items from the head up to a target
- * sequence id.
+ * @brief Truncates a log by deleting items from the head up to a target
+ * sequence id and updates the log metadata.
  *
  * Deletes every log item with sequence id in [head_item_sequence_id, to_id]
- * (inclusive), updates the log's metadata (head_item_sequence_id and
- * total_items), and returns the updated total item count via log_count.
+ * (inclusive), updates metadata (head_item_sequence_id and total_items), and
+ * returns the remaining total item count via @p log_count.
  *
  * @param to_id Target sequence id to truncate up to (inclusive). If greater
- * than the current tail sequence id it will be clamped to the tail. If less
- * than the current head sequence id the call fails with INVALID_PARAMETER.
+ * than the current tail it will be clamped to the tail. If less than the
+ * current head the call fails with LogError::INVALID_PARAMETER.
  * @param log_count Out parameter set to the remaining total_items after
  * truncation.
  *
- * Note: txm (transaction execution) must be non-null.
+ * Note: a valid transaction execution context must be provided via the
+ * function's transaction parameter (not documented here as it is a shared
+ * service object).
  *
  * @return LogError::SUCCESS on success.
- * @return LogError::INVALID_PARAMETER if txm is null or to_id <
- * head_item_sequence_id.
+ * @return LogError::INVALID_PARAMETER if the transaction context is null or
+ * if @p to_id < head_item_sequence_id.
  * @return LogError::LOG_NOT_FOUND if the named log does not exist.
  * @return LogError::STORAGE_ERROR on underlying storage read/write/delete
  * failures.

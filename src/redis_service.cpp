@@ -398,6 +398,26 @@ RedisServiceImpl::RedisServiceImpl(const std::string &config_file,
     RegisterFactory();
 }
 
+/**
+ * @brief Initialize the Redis service and all dependent subsystems.
+ *
+ * Performs full startup preparation for RedisServiceImpl: loads and validates
+ * configuration, applies command-line overrides, initializes resource limits,
+ * metrics, slow-log structures, cluster configuration, data-store backends,
+ * transaction service (TxService), optional local txlog/log service, pub/sub
+ * publish function, and related runtime components (including the optional
+ * Vector Index worker pool). Also registers command handlers and starts
+ * auxiliary threads used for metrics collection.
+ *
+ * The method performs multiple persistent side effects (setting RLIMIT_NOFILE,
+ * initializing AWS SDK where applicable, creating threads, starting services,
+ * and allocating global runtime state). On fatal initialization failures it
+ * logs an error and returns false. When the process is started with the
+ * bootstrap flag, the method may stop services and exit the process.
+ *
+ * @return true on successful initialization and readiness to serve requests;
+ * @return false if initialization failed (service should not start).
+ */
 bool RedisServiceImpl::Init(brpc::Server &brpc_server)
 {
     INIReader config_reader(config_file_);
@@ -2014,6 +2034,24 @@ bool RedisServiceImpl::InitTxLogService(
     return true;
 }
 
+/**
+ * @brief Gracefully shuts down the Redis service and its dependent subsystems.
+ *
+ * Stops and releases resources managed by RedisServiceImpl in a safe order:
+ * - shuts down the vector index worker pool (if created),
+ * - shuts down the transaction service,
+ * - releases the storage handler and disconnects any attached data-store service,
+ * - shuts down the internal log server (when enabled),
+ * - calls AWS SDK shutdown where applicable,
+ * - clears the tx_service_ pointer,
+ * - signals service shutdown via stopping_indicator_ and joins the metrics collector thread,
+ * - hides Redis stats exports if enabled.
+ *
+ * This method performs orderly teardown and blocks where necessary (e.g., joining
+ * the metrics collector thread and waiting for worker-pool shutdown). It is
+ * intended to be called during process/service shutdown and may be called
+ * multiple times safely (subsystems already stopped are simply skipped).
+ */
 void RedisServiceImpl::Stop()
 {
     if (vector_index_worker_pool_ != nullptr)
@@ -6513,6 +6551,29 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
     return true;
 }
 
+/**
+ * @brief Create a vector index by delegating the operation to the vector-index worker pool.
+ *
+ * This method submits an index-creation task to the configured vector index worker pool,
+ * blocks until the worker completes, and then records the result in the provided
+ * CreateVecIndexCommand (cmd) and writes the reply via OutputHandler.
+ *
+ * The function will commit or abort the provided transaction (txm) if auto_commit is true:
+ * - on success it commits the transaction and sets cmd->result_.err_code_ = RD_OK;
+ * - on failure it aborts the transaction and sets cmd->result_.err_code_ = RD_ERR_VECTOR_INDX_CREATE_FAILED.
+ *
+ * If the vector index worker pool is not enabled, the function reports an error through
+ * output->OnError("ERR Vector Index not enabled") and returns false.
+ *
+ * Note: this call blocks the caller until the worker completes the index creation.
+ *
+ * @param cmd Command object containing index name, dimensions, algorithm, metric, and algorithm parameters;
+ *            its result fields are populated by this function.
+ * @param auto_commit When true, the function will commit or abort the provided transaction automatically
+ *                    based on the index creation outcome.
+ * @return true if the request was processed and a response was written to output; false only when the
+ *         vector index worker pool is not enabled (and an error is emitted).
+ */
 bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
                                       TransactionExecution *txm,
                                       const TableName *table,
@@ -6571,6 +6632,30 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
     return true;
 }
 
+/**
+ * @brief Executes an InfoVecIndex command via the vector-index worker pool.
+ *
+ * Submits the vector-index Info operation to the configured worker pool and
+ * blocks the caller until the worker task completes. On success or failure the
+ * command's result (cmd->result_.err_code_) is set and cmd->OutputResult is
+ * invoked to emit the response. If @p auto_commit is true the transaction
+ * pointed to by @p txm is committed on success or aborted on failure.
+ *
+ * If the vector-index worker pool is not enabled, writes an error to @p output
+ * and returns false without executing the command.
+ *
+ * @param ctx Connection context for the request (used only when producing output).
+ * @param txm TransactionExecution to use for the vector operation; may be committed
+ *            or aborted depending on the outcome when @p auto_commit is true.
+ * @param table Unused for this command (may be nullptr).
+ * @param cmd Command object containing index name, metadata and where the result
+ *            will be written.
+ * @param output OutputHandler used to report immediate errors (e.g. when the
+ *               vector pool is disabled).
+ * @param auto_commit If true, commit the transaction on success or abort on failure.
+ * @return true if the command was processed and a response emitted; false only
+ *         when the vector-index worker pool is not enabled.
+ */
 bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
                                       TransactionExecution *txm,
                                       const TableName *table,

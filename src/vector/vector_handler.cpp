@@ -209,6 +209,13 @@ void VectorMetadata::Decode(const char *buf,
     assert(offset == buff_size);
 }
 
+/**
+ * @brief Returns the global singleton instance of VectorHandler.
+ *
+ * The instance is created on first use and reused for the lifetime of the process.
+ *
+ * @return VectorHandler& Reference to the singleton VectorHandler.
+ */
 VectorHandler &VectorHandler::Instance()
 {
     static VectorHandler instance;
@@ -216,20 +223,21 @@ VectorHandler &VectorHandler::Instance()
 }
 
 /**
- * @brief Create a new vector index metadata entry and initialize its lifecycle
- * log.
+ * @brief Create metadata for a vector index and initialize its lifecycle log.
  *
- * Creates metadata for the vector index described by idx_spec in the internal
- * metadata table and adds a corresponding log object. If an index with the
- * same name already exists this function does not modify state.
+ * Creates a metadata entry for the vector index described by idx_spec in the
+ * internal metadata table and creates a corresponding lifecycle log object.
+ * If an index with the same name already exists this function leaves state
+ * unchanged.
  *
- * @param idx_spec Index configuration (name, dimension, algorithm, storage
- * path, etc.).
+ * @param idx_spec Index configuration (name, dimension, algorithm, storage path, and algorithm parameters).
  *
  * @return VectorOpResult indicating the outcome:
  *   - SUCCEED: metadata and log were created successfully.
- *   - INDEX_EXISTED: an index with the given name already exists.
- *   - INDEX_META_OP_FAILED: a metadata table or log operation failed.
+ *   - INDEX_EXISTED: an index with the given name already exists; no changes made.
+ *   - INDEX_META_OP_FAILED: a metadata table write/read or log creation operation failed.
+ *
+ * @note This does not create an in-memory index instance or index file on disk.
  */
 VectorOpResult VectorHandler::Create(const IndexConfig &idx_spec,
                                      txservice::TransactionExecution *txm)
@@ -375,6 +383,20 @@ VectorOpResult VectorHandler::Drop(const std::string &name,
     return VectorOpResult::SUCCEED;
 }
 
+/**
+ * @brief Retrieve and decode stored metadata for a vector index.
+ *
+ * Reads the index metadata entry for the given index name from the metadata
+ * table, decodes it into the provided VectorMetadata object (using the
+ * stored record version), and returns the operation result.
+ *
+ * @param name Index name whose metadata will be fetched.
+ * @param metadata Output parameter that will be populated with the decoded metadata
+ *                 if the call succeeds.
+ * @return VectorOpResult::SUCCEED on success;
+ *         VectorOpResult::INDEX_NOT_EXIST if the metadata record is marked deleted;
+ *         VectorOpResult::INDEX_META_OP_FAILED if the metadata read/transaction failed.
+ */
 VectorOpResult VectorHandler::Info(const std::string &name,
                                    txservice::TransactionExecution *txm,
                                    VectorMetadata &metadata)
@@ -423,6 +445,29 @@ VectorOpResult VectorHandler::Info(const std::string &name,
     return VectorOpResult::SUCCEED;
 }
 
+/**
+ * @brief Perform a nearest-neighbor search against a named vector index.
+ *
+ * Reads index metadata, validates existence, decodes configuration, and (in a full
+ * implementation) would execute a k-NN search using the stored index, algorithm,
+ * and metric. Currently this is a placeholder that returns an empty SearchResult
+ * after verifying the index exists and decoding its metadata.
+ *
+ * @param name Index name to search.
+ * @param query_vector Query vector whose nearest neighbors are requested.
+ * @param k_count Number of nearest neighbors to return.
+ * @param search_params Algorithm-specific search parameters (passed through to the search if implemented).
+ * @param txm Transaction execution service used for metadata reads. (Service parameter; not documented further.)
+ * @param vector_result Output parameter populated with IDs, distances, and vectors for matches. On the current placeholder implementation this is cleared and left empty.
+ *
+ * @return VectorOpResult
+ *   - INDEX_META_OP_FAILED if a metadata read/transaction error occurs.
+ *   - INDEX_NOT_EXIST if the named index is not present (deleted or missing).
+ *   - SUCCEED on success (currently returns an empty result set).
+ *
+ * @note Dimension mismatch between the query_vector and the index is not enforced here (validation is commented out).
+ * @note Actual index loading and search logic are TODOs and are not performed by this implementation.
+ */
 VectorOpResult VectorHandler::Search(
     const std::string &name,
     const std::vector<float> &query_vector,

@@ -4908,6 +4908,23 @@ brpc::RedisCommandHandlerResult TimeCommandHandler::Run(
     return brpc::REDIS_CMD_HANDLED;
 }
 
+/**
+ * @brief Handle the `eloqvec.create` / `ELOQVEC.CREATE` Redis command.
+ *
+ * Parses the create-vector-index command, rejects usage inside an active
+ * transaction, allocates and initializes a new TransactionExecution from the
+ * Redis transaction service, and executes the command against the current
+ * database table. On parse failure or when invoked inside a transaction, an
+ * error reply is written to `output`.
+ *
+ * @param ctx Connection context for the client; used to determine the current
+ *            database id and whether a transaction is active.
+ * @param args Raw Redis command arguments as received from the client.
+ * @param output Reply object where the handler writes success or error replies.
+ *
+ * @return brpc::REDIS_CMD_HANDLED Always returns REDIS_CMD_HANDLED after
+ *         producing an appropriate reply.
+ */
 brpc::RedisCommandHandlerResult CreateVecIndexHandler::Run(
     RedisConnectionContext *ctx,
     const std::vector<butil::StringPiece> &args,
@@ -4939,6 +4956,21 @@ brpc::RedisCommandHandlerResult CreateVecIndexHandler::Run(
     return brpc::REDIS_CMD_HANDLED;
 }
 
+/**
+ * @brief Handle the ELOQVEC.INFO/eloqvec.info command.
+ *
+ * Parses and executes the vector-index info command. If the command is valid
+ * and not issued inside an active transaction, this creates a dedicated
+ * TransactionExecution from the transaction service, initializes it with the
+ * configured isolation level and concurrency protocol, and invokes
+ * redis_impl_->ExecuteCommand to produce the reply.
+ *
+ * If invoked while a transaction is active, an error reply is returned:
+ * "ERR vector command is not supported in transaction".
+ *
+ * @return brpc::REDIS_CMD_HANDLED Always returns REDIS_CMD_HANDLED after
+ *         producing the reply.
+ */
 brpc::RedisCommandHandlerResult InfoVecIndexHandler::Run(
     RedisConnectionContext *ctx,
     const std::vector<butil::StringPiece> &args,
