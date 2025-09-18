@@ -204,6 +204,7 @@ enum class VectorOpResult
     INDEX_ADD_FAILED,
     INDEX_UPDATE_FAILED,
     INDEX_DELETE_FAILED,
+    INDEX_LOG_OP_FAILED,
     UNKNOWN,
 };
 
