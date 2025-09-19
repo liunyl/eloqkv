@@ -9998,30 +9998,6 @@ ParseMultiCommand(RedisServiceImpl *redis_impl,
                 DirectRequest(
                     ctx, std::make_unique<PublishCommand>(std::move(cmd)))};
     }
-    case RedisCommandType::ELOQVEC_CREATE:
-    {
-        auto [success, cmd] = ParseCreateVecIndexCommand(args, output);
-        if (!success)
-        {
-            return {false, CustomCommandRequest{}};
-        }
-        return {success,
-                CustomCommandRequest(
-                    redis_impl->RedisTableName(ctx->db_id),
-                    std::make_unique<CreateVecIndexCommand>(std::move(cmd)))};
-    }
-    case RedisCommandType::ELOQVEC_INFO:
-    {
-        auto [success, cmd] = ParseInfoVecIndexCommand(args, output);
-        if (!success)
-        {
-            return {false, CustomCommandRequest{}};
-        }
-        return {success,
-                CustomCommandRequest(
-                    redis_impl->RedisTableName(ctx->db_id),
-                    std::make_unique<InfoVecIndexCommand>(std::move(cmd)))};
-    }
     default:
         LOG(WARNING) << "Unsupported command in MULTI " << args[0];
         output->OnError("Unsupported command in MULTI");
@@ -19954,17 +19930,12 @@ bool CreateVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
                                     OutputHandler *output,
                                     bool auto_commit)
 {
-    return redis_impl->ExecuteCommand(
-        ctx, txm, table, this, output, auto_commit);
+    return redis_impl->ExecuteCommand(ctx, this, output);
 }
 
 void CreateVecIndexCommand::OutputResult(OutputHandler *reply,
                                          RedisConnectionContext *ctx) const
 {
-    // TODO: Implement vector index creation result output
-    // This should output either:
-    // - Success message on successful index creation
-    // - Error message on failure
     if (result_.err_code_ == RD_OK)
     {
         reply->OnString("OK");
@@ -20027,18 +19998,12 @@ bool InfoVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
                                   OutputHandler *output,
                                   bool auto_commit)
 {
-    return redis_impl->ExecuteCommand(
-        ctx, txm, table, this, output, auto_commit);
+    return redis_impl->ExecuteCommand(ctx, txm, this, output, auto_commit);
 }
 
 void InfoVecIndexCommand::OutputResult(OutputHandler *reply,
                                        RedisConnectionContext *ctx) const
 {
-    // TODO: Implement vector index info result output
-    // This should output index information such as:
-    // - Index name, hash set, vector column
-    // - Dimensions, algorithm, metric type
-    // - Index statistics (number of vectors, etc.)
     if (result_.err_code_ == RD_OK)
     {
         // For now, return a simple placeholder response
@@ -20081,8 +20046,7 @@ bool DropVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
                                   OutputHandler *output,
                                   bool auto_commit)
 {
-    return redis_impl->ExecuteCommand(
-        ctx, txm, table, this, output, auto_commit);
+    return redis_impl->ExecuteCommand(ctx, this, output);
 }
 
 void DropVecIndexCommand::OutputResult(OutputHandler *reply,
@@ -20164,8 +20128,7 @@ bool AddVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
                                  OutputHandler *output,
                                  bool auto_commit)
 {
-    return redis_impl->ExecuteCommand(
-        ctx, txm, table, this, output, auto_commit);
+    return redis_impl->ExecuteCommand(ctx, txm, this, output, auto_commit);
 }
 
 void AddVecIndexCommand::OutputResult(OutputHandler *reply,
@@ -20187,10 +20150,8 @@ std::tuple<bool, UpdateVecIndexCommand> ParseUpdateVecIndexCommand(
 {
     assert(args[0] == "eloqvec.update" || args[0] == "ELOQVEC.UPDATE");
 
-    // ELOQVEC.UPDATE <index_name> <key> <vector_data> [PARAMS <param_name>
-    // <param_value> ...] Minimum required parameters: ELOQVEC.UPDATE
-    // <index_name> <key> <vector_data>
-    if (args.size() < 4)
+    // ELOQVEC.UPDATE <index_name> <key> <vector_data>
+    if (args.size() != 4)
     {
         output->OnError(
             "ERR wrong number of arguments for 'eloqvec.update' command");
@@ -20217,32 +20178,17 @@ std::tuple<bool, UpdateVecIndexCommand> ParseUpdateVecIndexCommand(
 
     // Parse vector data and optional parameters
     std::vector<float> vector_data;
-    std::unordered_map<std::string, std::string> update_params;
-
     size_t i = 3;
-    bool parsing_vector = true;
-
     // Parse vector data (until we hit PARAMS keyword or end of args)
     while (i < args.size())
     {
-        if (args[i] == "PARAMS" || args[i] == "params")
+        float val;
+        if (!string2float(args[i].data(), args[i].size(), val))
         {
-            parsing_vector = false;
-            i++;  // Skip PARAMS keyword
-            break;
+            output->OnError("ERR vector data must contain valid float values");
+            return {false, UpdateVecIndexCommand()};
         }
-
-        if (parsing_vector)
-        {
-            float val;
-            if (!string2float(args[i].data(), args[i].size(), val))
-            {
-                output->OnError(
-                    "ERR vector data must contain valid float values");
-                return {false, UpdateVecIndexCommand()};
-            }
-            vector_data.push_back(val);
-        }
+        vector_data.push_back(val);
         i++;
     }
 
@@ -20253,29 +20199,9 @@ std::tuple<bool, UpdateVecIndexCommand> ParseUpdateVecIndexCommand(
         return {false, UpdateVecIndexCommand()};
     }
 
-    // Parse optional parameters (key-value pairs)
-    if (!parsing_vector && i < args.size())
-    {
-        if ((args.size() - i) % 2 != 0)
-        {
-            output->OnError("ERR parameters must be key-value pairs");
-            return {false, UpdateVecIndexCommand()};
-        }
-
-        while (i < args.size())
-        {
-            std::string param_name(args[i]);
-            std::string param_value(args[i + 1]);
-            update_params[param_name] = param_value;
-            i += 2;
-        }
-    }
-
     // Create command with parsed parameters
-    return {
-        true,
-        UpdateVecIndexCommand(
-            index_name, key, std::move(vector_data), std::move(update_params))};
+    return {true,
+            UpdateVecIndexCommand(index_name, key, std::move(vector_data))};
 }
 
 bool UpdateVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
@@ -20285,8 +20211,7 @@ bool UpdateVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
                                     OutputHandler *output,
                                     bool auto_commit)
 {
-    return redis_impl->ExecuteCommand(
-        ctx, txm, table, this, output, auto_commit);
+    return redis_impl->ExecuteCommand(ctx, txm, this, output, auto_commit);
 }
 
 void UpdateVecIndexCommand::OutputResult(OutputHandler *reply,
@@ -20345,8 +20270,7 @@ bool DeleteVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
                                     OutputHandler *output,
                                     bool auto_commit)
 {
-    return redis_impl->ExecuteCommand(
-        ctx, txm, table, this, output, auto_commit);
+    return redis_impl->ExecuteCommand(ctx, txm, this, output, auto_commit);
 }
 
 void DeleteVecIndexCommand::OutputResult(OutputHandler *reply,
@@ -20368,9 +20292,7 @@ std::tuple<bool, SearchVecIndexCommand> ParseSearchVecIndexCommand(
 {
     assert(args[0] == "eloqvec.search" || args[0] == "ELOQVEC.SEARCH");
 
-    // ELOQVEC.SEARCH <index_name> <k_count> <vector_data> [PARAMS <param_name>
-    // <param_value> ...] Minimum required parameters: ELOQVEC.SEARCH
-    // <index_name> <k_count> <vector_data>
+    // ELOQVEC.SEARCH <index_name> <k_count> <vector_data>
     if (args.size() < 4)
     {
         output->OnError(
@@ -20398,32 +20320,17 @@ std::tuple<bool, SearchVecIndexCommand> ParseSearchVecIndexCommand(
 
     // Parse vector data and optional parameters
     std::vector<float> vector_data;
-    std::unordered_map<std::string, std::string> search_params;
-
     size_t i = 3;
-    bool parsing_vector = true;
-
     // Parse vector data (until we hit PARAMS keyword or end of args)
     while (i < args.size())
     {
-        if (args[i] == "PARAMS" || args[i] == "params")
+        float val;
+        if (!string2float(args[i].data(), args[i].size(), val))
         {
-            parsing_vector = false;
-            i++;  // Skip PARAMS keyword
-            break;
+            output->OnError("ERR vector data must contain valid float values");
+            return {false, SearchVecIndexCommand()};
         }
-
-        if (parsing_vector)
-        {
-            float val;
-            if (!string2float(args[i].data(), args[i].size(), val))
-            {
-                output->OnError(
-                    "ERR vector data must contain valid float values");
-                return {false, SearchVecIndexCommand()};
-            }
-            vector_data.push_back(val);
-        }
+        vector_data.push_back(val);
         i++;
     }
 
@@ -20434,30 +20341,9 @@ std::tuple<bool, SearchVecIndexCommand> ParseSearchVecIndexCommand(
         return {false, SearchVecIndexCommand()};
     }
 
-    // Parse optional parameters (key-value pairs)
-    if (!parsing_vector && i < args.size())
-    {
-        if ((args.size() - i) % 2 != 0)
-        {
-            output->OnError("ERR parameters must be key-value pairs");
-            return {false, SearchVecIndexCommand()};
-        }
-
-        while (i < args.size())
-        {
-            std::string param_name(args[i]);
-            std::string param_value(args[i + 1]);
-            search_params[param_name] = param_value;
-            i += 2;
-        }
-    }
-
     // Create command with parsed parameters
     return {true,
-            SearchVecIndexCommand(index_name,
-                                  std::move(vector_data),
-                                  k_count,
-                                  std::move(search_params))};
+            SearchVecIndexCommand(index_name, std::move(vector_data), k_count)};
 }
 
 bool SearchVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
@@ -20467,8 +20353,7 @@ bool SearchVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
                                     OutputHandler *output,
                                     bool auto_commit)
 {
-    return redis_impl->ExecuteCommand(
-        ctx, txm, table, this, output, auto_commit);
+    return redis_impl->ExecuteCommand(ctx, txm, this, output, auto_commit);
 }
 
 void SearchVecIndexCommand::OutputResult(OutputHandler *reply,

@@ -389,50 +389,39 @@ public:
                         bool auto_commit);
 
     bool ExecuteCommand(RedisConnectionContext *ctx,
-                        TransactionExecution *txm,
-                        const TableName *table,
                         CreateVecIndexCommand *cmd,
-                        OutputHandler *output,
-                        bool auto_commit);
+                        OutputHandler *output);
 
     bool ExecuteCommand(RedisConnectionContext *ctx,
                         TransactionExecution *txm,
-                        const TableName *table,
                         InfoVecIndexCommand *cmd,
                         OutputHandler *output,
                         bool auto_commit);
 
     bool ExecuteCommand(RedisConnectionContext *ctx,
-                        TransactionExecution *txm,
-                        const TableName *table,
                         DropVecIndexCommand *cmd,
-                        OutputHandler *output,
-                        bool auto_commit);
+                        OutputHandler *output);
 
     bool ExecuteCommand(RedisConnectionContext *ctx,
                         TransactionExecution *txm,
-                        const TableName *table,
                         AddVecIndexCommand *cmd,
                         OutputHandler *output,
                         bool auto_commit);
 
     bool ExecuteCommand(RedisConnectionContext *ctx,
                         TransactionExecution *txm,
-                        const TableName *table,
                         UpdateVecIndexCommand *cmd,
                         OutputHandler *output,
                         bool auto_commit);
 
     bool ExecuteCommand(RedisConnectionContext *ctx,
                         TransactionExecution *txm,
-                        const TableName *table,
                         DeleteVecIndexCommand *cmd,
                         OutputHandler *output,
                         bool auto_commit);
 
     bool ExecuteCommand(RedisConnectionContext *ctx,
                         TransactionExecution *txm,
-                        const TableName *table,
                         SearchVecIndexCommand *cmd,
                         OutputHandler *output,
                         bool auto_commit);

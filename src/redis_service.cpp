@@ -5505,76 +5505,6 @@ void RedisServiceImpl::GenericCommand(RedisConnectionContext *ctx,
         }
         break;
     }
-    case RedisCommandType::ELOQVEC_CREATE:
-    {
-        auto [success, cmd] = ParseCreateVecIndexCommand(cmd_arg_list, output);
-        if (success)
-        {
-            ExecuteCommand(
-                ctx, txm, RedisTableName(ctx->db_id), &cmd, output, false);
-        }
-        break;
-    }
-    case RedisCommandType::ELOQVEC_INFO:
-    {
-        auto [success, cmd] = ParseInfoVecIndexCommand(cmd_arg_list, output);
-        if (success)
-        {
-            ExecuteCommand(
-                ctx, txm, RedisTableName(ctx->db_id), &cmd, output, false);
-        }
-        break;
-    }
-    case RedisCommandType::ELOQVEC_DROP:
-    {
-        auto [success, cmd] = ParseDropVecIndexCommand(cmd_arg_list, output);
-        if (success)
-        {
-            ExecuteCommand(
-                ctx, txm, RedisTableName(ctx->db_id), &cmd, output, false);
-        }
-        break;
-    }
-    case RedisCommandType::ELOQVEC_ADD:
-    {
-        auto [success, cmd] = ParseAddVecIndexCommand(cmd_arg_list, output);
-        if (success)
-        {
-            ExecuteCommand(
-                ctx, txm, RedisTableName(ctx->db_id), &cmd, output, false);
-        }
-        break;
-    }
-    case RedisCommandType::ELOQVEC_UPDATE:
-    {
-        auto [success, cmd] = ParseUpdateVecIndexCommand(cmd_arg_list, output);
-        if (success)
-        {
-            ExecuteCommand(
-                ctx, txm, RedisTableName(ctx->db_id), &cmd, output, false);
-        }
-        break;
-    }
-    case RedisCommandType::ELOQVEC_DELETE:
-    {
-        auto [success, cmd] = ParseDeleteVecIndexCommand(cmd_arg_list, output);
-        if (success)
-        {
-            ExecuteCommand(
-                ctx, txm, RedisTableName(ctx->db_id), &cmd, output, false);
-        }
-        break;
-    }
-    case RedisCommandType::ELOQVEC_SEARCH:
-    {
-        auto [success, cmd] = ParseSearchVecIndexCommand(cmd_arg_list, output);
-        if (success)
-        {
-            ExecuteCommand(
-                ctx, txm, RedisTableName(ctx->db_id), &cmd, output, false);
-        }
-        break;
-    }
     default:
         LOG(WARNING) << "Lua unsupported command type: " << cmd_arg_list[0];
         output->OnError("Unknown Redis command called from script");
@@ -6586,11 +6516,8 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
 }
 
 bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
-                                      TransactionExecution *txm,
-                                      const TableName *table,
                                       CreateVecIndexCommand *cmd,
-                                      OutputHandler *output,
-                                      bool auto_commit)
+                                      OutputHandler *output)
 {
     if (vector_index_worker_pool_ == nullptr)
     {
@@ -6622,29 +6549,16 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
             cv.wait(lk);
         }
     }
-    if (res == EloqVec::VectorOpResult::SUCCEED)
-    {
-        if (auto_commit)
-        {
-            CommitTx(txm);
-        }
-        cmd->result_.err_code_ = RD_OK;
-    }
-    else
-    {
-        if (auto_commit)
-        {
-            AbortTx(txm);
-        }
-        cmd->result_.err_code_ = RD_ERR_VECTOR_INDX_CREATE_FAILED;
-    }
+
+    cmd->result_.err_code_ = res == EloqVec::VectorOpResult::SUCCEED
+                                 ? RD_OK
+                                 : RD_ERR_VECTOR_INDX_CREATE_FAILED;
     cmd->OutputResult(output, ctx);
     return true;
 }
 
 bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
                                       TransactionExecution *txm,
-                                      const TableName *table,
                                       InfoVecIndexCommand *cmd,
                                       OutputHandler *output,
                                       bool auto_commit)
@@ -6695,11 +6609,8 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
 }
 
 bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
-                                      TransactionExecution *txm,
-                                      const TableName *table,
                                       DropVecIndexCommand *cmd,
-                                      OutputHandler *output,
-                                      bool auto_commit)
+                                      OutputHandler *output)
 {
     if (vector_index_worker_pool_ == nullptr)
     {
@@ -6726,29 +6637,15 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
             cv.wait(lk);
         }
     }
-    if (res == EloqVec::VectorOpResult::SUCCEED)
-    {
-        if (auto_commit)
-        {
-            CommitTx(txm);
-        }
-        cmd->result_.err_code_ = RD_OK;
-    }
-    else
-    {
-        if (auto_commit)
-        {
-            AbortTx(txm);
-        }
-        cmd->result_.err_code_ = RD_ERR_VECTOR_INDX_DROP_FAILED;
-    }
+    cmd->result_.err_code_ = res == EloqVec::VectorOpResult::SUCCEED
+                                 ? RD_OK
+                                 : RD_ERR_VECTOR_INDX_DROP_FAILED;
     cmd->OutputResult(output, ctx);
     return true;
 }
 
 bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
                                       TransactionExecution *txm,
-                                      const TableName *table,
                                       AddVecIndexCommand *cmd,
                                       OutputHandler *output,
                                       bool auto_commit)
@@ -6800,7 +6697,6 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
 
 bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
                                       TransactionExecution *txm,
-                                      const TableName *table,
                                       UpdateVecIndexCommand *cmd,
                                       OutputHandler *output,
                                       bool auto_commit)
@@ -6852,7 +6748,6 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
 
 bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
                                       TransactionExecution *txm,
-                                      const TableName *table,
                                       DeleteVecIndexCommand *cmd,
                                       OutputHandler *output,
                                       bool auto_commit)
@@ -6904,7 +6799,6 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
 
 bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
                                       TransactionExecution *txm,
-                                      const TableName *table,
                                       SearchVecIndexCommand *cmd,
                                       OutputHandler *output,
                                       bool auto_commit)

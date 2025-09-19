@@ -7072,15 +7072,10 @@ struct UpdateVecIndexCommand : public CustomCommand
     UpdateVecIndexCommand() = default;
 
     // Constructor with required parameters
-    UpdateVecIndexCommand(
-        std::string_view index_name,
-        uint64_t key,
-        std::vector<float> &&vector,
-        std::unordered_map<std::string, std::string> &&update_params = {})
-        : index_name_(index_name),
-          key_(key),
-          vector_(std::move(vector)),
-          update_params_(std::move(update_params))
+    UpdateVecIndexCommand(std::string_view index_name,
+                          uint64_t key,
+                          std::vector<float> &&vector)
+        : index_name_(index_name), key_(key), vector_(std::move(vector))
     {
     }
 
@@ -7106,8 +7101,6 @@ struct UpdateVecIndexCommand : public CustomCommand
     uint64_t key_;
     // Vector data
     std::vector<float> vector_;
-    // Update parameters (optional)
-    std::unordered_map<std::string, std::string> update_params_;
 
     // Result storage
     RedisCommandResult result_;
@@ -7153,15 +7146,10 @@ struct SearchVecIndexCommand : public CustomCommand
     SearchVecIndexCommand() = default;
 
     // Constructor with required parameters
-    SearchVecIndexCommand(
-        std::string_view index_name,
-        std::vector<float> &&vector,
-        size_t k_count,
-        std::unordered_map<std::string, std::string> &&search_params = {})
-        : index_name_(index_name),
-          vector_(std::move(vector)),
-          k_count_(k_count),
-          search_params_(std::move(search_params))
+    SearchVecIndexCommand(std::string_view index_name,
+                          std::vector<float> &&vector,
+                          size_t k_count)
+        : index_name_(index_name), vector_(std::move(vector)), k_count_(k_count)
     {
     }
 
@@ -7187,8 +7175,6 @@ struct SearchVecIndexCommand : public CustomCommand
     std::vector<float> vector_;
     // Number of results to return
     size_t k_count_;
-    // Search parameters (optional)
-    std::unordered_map<std::string, std::string> search_params_;
 
     // Search result storage
     EloqVec::SearchResult search_res_;
