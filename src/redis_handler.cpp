@@ -4957,7 +4957,7 @@ brpc::RedisCommandHandlerResult InfoVecIndexHandler::Run(
         // worker pool
         TransactionExecution *txm = redis_impl_->GetTxService()->NewTx();
         txm->InitTx(iso_level_, cc_protocol_);
-        redis_impl_->ExecuteCommand(ctx, txm, &cmd, &reply, auto_commit_);
+        redis_impl_->ExecuteCommand(ctx, txm, &cmd, &reply, true);
     }
 
     return brpc::REDIS_CMD_HANDLED;
@@ -5009,7 +5009,7 @@ brpc::RedisCommandHandlerResult AddVecIndexHandler::Run(
         }
         TransactionExecution *txm = redis_impl_->GetTxService()->NewTx();
         txm->InitTx(iso_level_, cc_protocol_);
-        redis_impl_->ExecuteCommand(ctx, txm, &cmd, &reply, auto_commit_);
+        redis_impl_->ExecuteCommand(ctx, txm, &cmd, &reply, true);
     }
 
     return brpc::REDIS_CMD_HANDLED;
@@ -5038,7 +5038,7 @@ brpc::RedisCommandHandlerResult UpdateVecIndexHandler::Run(
         // worker pool
         TransactionExecution *txm = redis_impl_->GetTxService()->NewTx();
         txm->InitTx(iso_level_, cc_protocol_);
-        redis_impl_->ExecuteCommand(ctx, txm, &cmd, &reply, auto_commit_);
+        redis_impl_->ExecuteCommand(ctx, txm, &cmd, &reply, true);
     }
 
     return brpc::REDIS_CMD_HANDLED;
@@ -5067,7 +5067,7 @@ brpc::RedisCommandHandlerResult DeleteVecIndexHandler::Run(
         // worker pool
         TransactionExecution *txm = redis_impl_->GetTxService()->NewTx();
         txm->InitTx(iso_level_, cc_protocol_);
-        redis_impl_->ExecuteCommand(ctx, txm, &cmd, &reply, auto_commit_);
+        redis_impl_->ExecuteCommand(ctx, txm, &cmd, &reply, true);
     }
 
     return brpc::REDIS_CMD_HANDLED;
@@ -5096,7 +5096,7 @@ brpc::RedisCommandHandlerResult SearchVecIndexHandler::Run(
         // worker pool
         TransactionExecution *txm = redis_impl_->GetTxService()->NewTx();
         txm->InitTx(iso_level_, cc_protocol_);
-        redis_impl_->ExecuteCommand(ctx, txm, &cmd, &reply, auto_commit_);
+        redis_impl_->ExecuteCommand(ctx, txm, &cmd, &reply, true);
     }
 
     return brpc::REDIS_CMD_HANDLED;

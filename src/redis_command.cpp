@@ -20176,10 +20176,10 @@ std::tuple<bool, UpdateVecIndexCommand> ParseUpdateVecIndexCommand(
         return {false, UpdateVecIndexCommand()};
     }
 
-    // Parse vector data and optional parameters
+    // Parse vector data
     std::vector<float> vector_data;
     size_t i = 3;
-    // Parse vector data (until we hit PARAMS keyword or end of args)
+    // Parse vector data (until we hit end of args)
     while (i < args.size())
     {
         float val;
@@ -20318,10 +20318,10 @@ std::tuple<bool, SearchVecIndexCommand> ParseSearchVecIndexCommand(
         return {false, SearchVecIndexCommand()};
     }
 
-    // Parse vector data and optional parameters
+    // Parse vector data
     std::vector<float> vector_data;
     size_t i = 3;
-    // Parse vector data (until we hit PARAMS keyword or end of args)
+    // Parse vector data (until we hit end of args)
     while (i < args.size())
     {
         float val;
