@@ -6906,15 +6906,11 @@ struct CreateVecIndexCommand : public CustomCommand
     // Constructor with required parameters
     CreateVecIndexCommand(
         std::string_view index_name,
-        std::string_view hash_set_name,
-        std::string_view vector_column_name,
         uint32_t dimensions,
         EloqVec::Algorithm algorithm,
         EloqVec::DistanceMetric metric_type,
         std::unordered_map<std::string, std::string> &&alg_params)
         : index_name_(index_name),
-          hash_set_name_(hash_set_name),
-          vector_column_name_(vector_column_name),
           dimensions_(dimensions),
           algorithm_(algorithm),
           metric_type_(metric_type),
@@ -6940,10 +6936,6 @@ struct CreateVecIndexCommand : public CustomCommand
 
     // Name of the vector index
     EloqString index_name_;
-    // Name of the primary hash set to index
-    EloqString hash_set_name_;
-    // Column containing vector embeddings
-    EloqString vector_column_name_;
     // Number of dimensions in the vectors
     uint32_t dimensions_;
     // HNSW or IVF (currently only HNSW supported)
@@ -6951,8 +6943,8 @@ struct CreateVecIndexCommand : public CustomCommand
     // Distance metric (cosine, l2sq, ip)
     EloqVec::DistanceMetric metric_type_;
 
-    // Algorithm specific parameters (such as for HNSW: connectivity,
-    // ef_construct, ef_search, scalar_type, etc.)
+    // Algorithm specific parameters (such as for HNSW: max_connectivity,
+    // ef_construction, ef_search, etc.)
     std::unordered_map<std::string, std::string> alg_params_;
 
     // Result storage

@@ -19744,11 +19744,10 @@ std::tuple<bool, CreateVecIndexCommand> ParseCreateVecIndexCommand(
 {
     assert(args[0] == "eloqvec.create" || args[0] == "ELOQVEC.CREATE");
 
-    // Minimum required parameters: ELOQVEC.CREATE <index_name> ON
-    // <hash_set_name> COLUMN <vector_column_name> DIMENSIONS <dimensions>
-    // METRIC <metric_type> ALGORITHM <algorithm> That's 12 arguments minimum
-    // (including the command)
-    if (args.size() < 12)
+    // Minimum required parameters: ELOQVEC.CREATE <index_name> DIMENSIONS
+    // <dimensions> METRIC <metric_type> ALGORITHM <algorithm> That's 8
+    // arguments minimum (including the command)
+    if (args.size() < 8)
     {
         output->OnError(
             "ERR wrong number of arguments for 'eloqvec.create' command");
@@ -19757,8 +19756,6 @@ std::tuple<bool, CreateVecIndexCommand> ParseCreateVecIndexCommand(
 
     // Variables to hold parsed parameters
     std::string_view index_name;
-    std::string_view hash_set_name;
-    std::string_view vector_column_name;
     uint64_t dimensions;
     EloqVec::Algorithm algorithm;
     EloqVec::DistanceMetric metric_type;
@@ -19768,24 +19765,6 @@ std::tuple<bool, CreateVecIndexCommand> ParseCreateVecIndexCommand(
 
     // Parse index_name
     index_name = args[pos++];
-
-    // Parse ON keyword and hash_set_name
-    if (!stringcomp("on", args[pos], 1))
-    {
-        output->OnError("ERR syntax error: expected 'ON' keyword");
-        return {false, CreateVecIndexCommand()};
-    }
-    pos++;
-    hash_set_name = args[pos++];
-
-    // Parse COLUMN keyword and vector_column_name
-    if (!stringcomp("column", args[pos], 1))
-    {
-        output->OnError("ERR syntax error: expected 'COLUMN' keyword");
-        return {false, CreateVecIndexCommand()};
-    }
-    pos++;
-    vector_column_name = args[pos++];
 
     // Parse DIMENSIONS keyword and dimensions value
     if (!stringcomp("dimensions", args[pos], 1))
@@ -19846,7 +19825,7 @@ std::tuple<bool, CreateVecIndexCommand> ParseCreateVecIndexCommand(
         std::string_view param = args[pos];
         std::string_view value = args[pos + 1];
 
-        if (stringcomp("connectivity", param, 1))
+        if (stringcomp("max_connectivity", param, 1))
         {
             int64_t connectivity;
             if (!string2ll(value.data(), value.size(), connectivity) ||
@@ -19857,9 +19836,9 @@ std::tuple<bool, CreateVecIndexCommand> ParseCreateVecIndexCommand(
                     "integer");
                 return {false, CreateVecIndexCommand()};
             }
-            alg_params["connectivity"] = std::string(value);
+            alg_params["m"] = std::string(value);
         }
-        else if (stringcomp("ef_construct", param, 1))
+        else if (stringcomp("ef_construction", param, 1))
         {
             int64_t ef_construct;
             if (!string2ll(value.data(), value.size(), ef_construct) ||
@@ -19870,7 +19849,7 @@ std::tuple<bool, CreateVecIndexCommand> ParseCreateVecIndexCommand(
                     "integer");
                 return {false, CreateVecIndexCommand()};
             }
-            alg_params["ef_construct"] = std::string(value);
+            alg_params["ef_construction"] = std::string(value);
         }
         else if (stringcomp("ef_search", param, 1))
         {
@@ -19885,24 +19864,6 @@ std::tuple<bool, CreateVecIndexCommand> ParseCreateVecIndexCommand(
             }
             alg_params["ef_search"] = std::string(value);
         }
-        else if (stringcomp("scalar_type", param, 1))
-        {
-            std::string scalar_type_str = std::string(value);
-            std::transform(scalar_type_str.begin(),
-                           scalar_type_str.end(),
-                           scalar_type_str.begin(),
-                           ::tolower);
-            if (scalar_type_str != "f32" && scalar_type_str != "f64" &&
-                scalar_type_str != "i8" && scalar_type_str != "i16" &&
-                scalar_type_str != "i32")
-            {
-                output->OnError(
-                    "ERR unsupported scalar type: supported types are f32, "
-                    "f64, i8, i16, i32");
-                return {false, CreateVecIndexCommand()};
-            }
-            alg_params["scalar_type"] = scalar_type_str;
-        }
         else
         {
             output->OnError("ERR unknown parameter: " + std::string(param));
@@ -19915,8 +19876,6 @@ std::tuple<bool, CreateVecIndexCommand> ParseCreateVecIndexCommand(
     // Create command with all parsed parameters using constructor
     return {true,
             CreateVecIndexCommand(index_name,
-                                  hash_set_name,
-                                  vector_column_name,
                                   dimensions,
                                   algorithm,
                                   metric_type,
@@ -20151,7 +20110,7 @@ std::tuple<bool, UpdateVecIndexCommand> ParseUpdateVecIndexCommand(
     assert(args[0] == "eloqvec.update" || args[0] == "ELOQVEC.UPDATE");
 
     // ELOQVEC.UPDATE <index_name> <key> <vector_data>
-    if (args.size() != 4)
+    if (args.size() < 4)
     {
         output->OnError(
             "ERR wrong number of arguments for 'eloqvec.update' command");
