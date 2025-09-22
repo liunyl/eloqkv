@@ -19745,9 +19745,9 @@ std::tuple<bool, CreateVecIndexCommand> ParseCreateVecIndexCommand(
     assert(args[0] == "eloqvec.create" || args[0] == "ELOQVEC.CREATE");
 
     // Minimum required parameters: ELOQVEC.CREATE <index_name> DIMENSIONS
-    // <dimensions> METRIC <metric_type> ALGORITHM <algorithm> That's 8
-    // arguments minimum (including the command)
-    if (args.size() < 8)
+    // <dimensions> METRIC <metric_type> ALGORITHM <algorithm> PERSIST_STRATEGY
+    // <persist_strategy> That's 9 arguments minimum (including the command)
+    if (args.size() < 9)
     {
         output->OnError(
             "ERR wrong number of arguments for 'eloqvec.create' command");
@@ -19759,6 +19759,9 @@ std::tuple<bool, CreateVecIndexCommand> ParseCreateVecIndexCommand(
     uint64_t dimensions;
     EloqVec::Algorithm algorithm;
     EloqVec::DistanceMetric metric_type;
+    EloqVec::PersistStrategy persist_strategy;
+    // -1 means MANUAL strategy
+    int64_t threshold = -1;
     std::unordered_map<std::string, std::string> alg_params;
 
     size_t pos = 1;
@@ -19767,12 +19770,11 @@ std::tuple<bool, CreateVecIndexCommand> ParseCreateVecIndexCommand(
     index_name = args[pos++];
 
     // Parse DIMENSIONS keyword and dimensions value
-    if (!stringcomp("dimensions", args[pos], 1))
+    if (!stringcomp("dimensions", args[pos++], 1))
     {
         output->OnError("ERR syntax error: expected 'DIMENSIONS' keyword");
         return {false, CreateVecIndexCommand()};
     }
-    pos++;
     if (!string2ull(args[pos].data(), args[pos].size(), dimensions))
     {
         output->OnError(
@@ -19782,36 +19784,77 @@ std::tuple<bool, CreateVecIndexCommand> ParseCreateVecIndexCommand(
     pos++;
 
     // Parse METRIC keyword and metric_type
-    if (!stringcomp("metric", args[pos], 1))
+    if (!stringcomp("metric", args[pos++], 1))
     {
         output->OnError("ERR syntax error: expected 'METRIC' keyword");
         return {false, CreateVecIndexCommand()};
     }
-    pos++;
     // Convert metric string to proper format for string_to_distance_metric
-    metric_type = EloqVec::string_to_distance_metric(args[pos]);
+    metric_type = EloqVec::string_to_distance_metric(args[pos++]);
     if (metric_type == EloqVec::DistanceMetric::UNKNOWN)
     {
         output->OnError(
             "ERR unsupported metric: only COSINE, L2SQ and IP are supported");
         return {false, CreateVecIndexCommand()};
     }
-    pos++;
 
     // Parse ALGORITHM keyword and algorithm
-    if (!stringcomp("algorithm", args[pos], 1))
+    if (!stringcomp("algorithm", args[pos++], 1))
     {
         output->OnError("ERR syntax error: expected 'ALGORITHM' keyword");
         return {false, CreateVecIndexCommand()};
     }
-    pos++;
-    algorithm = EloqVec::string_to_algorithm(args[pos]);
+    algorithm = EloqVec::string_to_algorithm(args[pos++]);
     if (algorithm == EloqVec::Algorithm::UNKNOWN)
     {
         output->OnError("ERR unsupported algorithm: only HNSW are supported");
         return {false, CreateVecIndexCommand()};
     }
-    pos++;
+
+    // Parse persist_strategy
+    if (!stringcomp("persist_strategy", args[pos++], 1))
+    {
+        output->OnError(
+            "ERR syntax error: expected 'PERSIST_STRATEGY' keyword");
+        return {false, CreateVecIndexCommand()};
+    }
+    persist_strategy = EloqVec::string_to_persist_strategy(args[pos++]);
+    if (persist_strategy == EloqVec::PersistStrategy::UNKNOWN)
+    {
+        output->OnError(
+            "ERR unsupported persist strategy: only EVERY_N and MANUAL are "
+            "supported");
+        return {false, CreateVecIndexCommand()};
+    }
+    // Handle threshold parameter based on persist strategy
+    bool requires_threshold =
+        (persist_strategy == EloqVec::PersistStrategy::EVERY_N);
+    bool has_threshold = stringcomp("threshold", args[pos++], 1);
+    // EVERY_N strategy requires threshold parameter
+    if (requires_threshold && !has_threshold)
+    {
+        output->OnError("ERR syntax error: expected 'THRESHOLD' keyword");
+        return {false, CreateVecIndexCommand()};
+    }
+    // Parse threshold if present
+    if (has_threshold)
+    {
+        bool parse_success =
+            string2ll(args[pos].data(), args[pos].size(), threshold);
+        // Validate threshold for EVERY_N strategy
+        if (requires_threshold && (!parse_success || threshold <= 0))
+        {
+            output->OnError(
+                "ERR invalid value for THRESHOLD: must be a positive integer");
+            return {false, CreateVecIndexCommand()};
+        }
+        // MANUAL strategy ignores threshold value
+        if (persist_strategy == EloqVec::PersistStrategy::MANUAL)
+        {
+            threshold = -1;
+        }
+        pos++;
+    }
 
     // Parse optional parameters
     while (pos < args.size())
@@ -19879,6 +19922,7 @@ std::tuple<bool, CreateVecIndexCommand> ParseCreateVecIndexCommand(
                                   dimensions,
                                   algorithm,
                                   metric_type,
+                                  threshold,
                                   std::move(alg_params))};
 }
 
@@ -19967,7 +20011,7 @@ void InfoVecIndexCommand::OutputResult(OutputHandler *reply,
     {
         // For now, return a simple placeholder response
         auto &alg_params = metadata_.VecAlgParams();
-        size_t len = (6 + alg_params.size()) * 2;
+        size_t len = (7 + alg_params.size()) * 2;
         reply->OnArrayStart(len);
         reply->OnString("index_name");
         reply->OnString(index_name_.StringView());
@@ -19978,6 +20022,8 @@ void InfoVecIndexCommand::OutputResult(OutputHandler *reply,
         reply->OnString("metric");
         reply->OnString(
             EloqVec::distance_metric_to_string(metadata_.VecMetric()));
+        reply->OnString("buffer_threshold");
+        reply->OnString(std::to_string(metadata_.PersistThreshold()));
         // algorithm parameters
         for (const auto &param : alg_params)
         {
