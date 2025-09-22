@@ -90,16 +90,6 @@ public:
         return file_path_;
     }
 
-    uint64_t LastPersistedSequenceId() const
-    {
-        return last_persisted_sequence_id_;
-    }
-
-    void SetLastPersistedSequenceId(uint64_t seq_id)
-    {
-        last_persisted_sequence_id_ = seq_id;
-    }
-
     void SetFilePath(const std::string &path)
     {
         file_path_ = path;
@@ -127,8 +117,6 @@ private:
     size_t size_{0};
     uint64_t created_ts_{0};
     uint64_t last_persist_ts_{0};
-    // Persistence tracking fields
-    uint64_t last_persisted_sequence_id_{0};
 };
 
 /**

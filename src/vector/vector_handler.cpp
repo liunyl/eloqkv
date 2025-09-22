@@ -43,6 +43,9 @@ using txservice::TxRecord;
 using txservice::TxService;
 using txservice::UpsertTxRequest;
 
+// Constants for sharded log operations
+constexpr uint32_t VECTOR_INDEX_LOG_SHARD_COUNT = 1024;
+
 inline std::string build_metadata_key(const std::string &name)
 {
     std::string key_pattern("vector_index:");
@@ -166,9 +169,6 @@ void VectorMetadata::Encode(std::string &encoded_str) const
     val_ptr = reinterpret_cast<const char *>(&created_ts_);
     encoded_str.append(val_ptr, len_sizeof);
 
-    // Serialize persistence tracking fields
-    len_sizeof = sizeof(uint64_t);
-    val_ptr = reinterpret_cast<const char *>(&last_persisted_sequence_id_);
     // persist ts
     len_sizeof = sizeof(uint64_t);
     val_ptr = reinterpret_cast<const char *>(&last_persist_ts_);
@@ -240,18 +240,7 @@ void VectorMetadata::Decode(const char *buf,
     created_ts_ = created_ts_ == 0 ? version : created_ts_;
     offset += sizeof(uint64_t);
 
-    // Deserialize persistence tracking fields (if available)
-    if (offset + sizeof(uint64_t) <= buff_size)
-    {
-        last_persisted_sequence_id_ =
-            *reinterpret_cast<const uint64_t *>(buf + offset);
-        offset += sizeof(uint64_t);
-    }
-    else
-    {
-        last_persisted_sequence_id_ = 0;  // Default for backward compatibility
-    }
-
+    // Deserialize persistence tracking fields
     last_persist_ts_ = *reinterpret_cast<const uint64_t *>(buf + offset);
     offset += sizeof(uint64_t);
 }
@@ -364,9 +353,9 @@ VectorOpResult VectorHandler::Create(const IndexConfig &idx_spec)
         return VectorOpResult::INDEX_META_OP_FAILED;
     }
 
-    // 4. create the log object
+    // 4. create the sharded log objects
     LogError log_err =
-        LogObject::create_log(build_log_name(idx_spec.name), txm);
+        LogObject::create_sharded_logs(build_log_name(idx_spec.name), VECTOR_INDEX_LOG_SHARD_COUNT, txm);
     if (log_err != LogError::SUCCESS)
     {
         AbortTx(txm);
@@ -446,8 +435,8 @@ VectorOpResult VectorHandler::Drop(const std::string &name)
         return VectorOpResult::INDEX_META_OP_FAILED;
     }
 
-    // 5. delete the log object
-    LogError log_err = LogObject::remove_log(build_log_name(name), txm);
+    // 5. delete the sharded log objects
+    LogError log_err = LogObject::remove_sharded_logs(build_log_name(name), VECTOR_INDEX_LOG_SHARD_COUNT, txm);
     if (log_err != LogError::SUCCESS)
     {
         AbortTx(txm);
@@ -604,8 +593,8 @@ VectorOpResult VectorHandler::Add(const std::string &name,
     std::vector<log_item_t> log_items;
     log_items.emplace_back(
         LogOperationType::INSERT, std::to_string(id), serialized_vector, ts, 0);
-    LogError log_err = LogObject::append_log(
-        build_log_name(name), log_items, log_id, log_count, txm);
+    LogError log_err = LogObject::append_log_sharded(
+        build_log_name(name), std::to_string(id), VECTOR_INDEX_LOG_SHARD_COUNT, log_items, log_id, log_count, txm);
     if (log_err != LogError::SUCCESS)
     {
         return VectorOpResult::INDEX_LOG_OP_FAILED;
@@ -672,8 +661,8 @@ VectorOpResult VectorHandler::Update(const std::string &name,
     std::vector<log_item_t> log_items;
     log_items.emplace_back(
         LogOperationType::UPDATE, std::to_string(id), serialized_vector, ts, 0);
-    LogError log_err = LogObject::append_log(
-        build_log_name(name), log_items, log_id, log_count, txm);
+    LogError log_err = LogObject::append_log_sharded(
+        build_log_name(name), std::to_string(id), VECTOR_INDEX_LOG_SHARD_COUNT, log_items, log_id, log_count, txm);
     if (log_err != LogError::SUCCESS)
     {
         return VectorOpResult::INDEX_LOG_OP_FAILED;
@@ -744,8 +733,8 @@ VectorOpResult VectorHandler::Delete(const std::string &name,
                            serialized_empty_vec,
                            ts,
                            0);
-    LogError log_err = LogObject::append_log(
-        build_log_name(name), log_items, log_id, log_count, txm);
+    LogError log_err = LogObject::append_log_sharded(
+        build_log_name(name), std::to_string(id), VECTOR_INDEX_LOG_SHARD_COUNT, log_items, log_id, log_count, txm);
     if (log_err != LogError::SUCCESS)
     {
         return VectorOpResult::INDEX_LOG_OP_FAILED;
@@ -923,14 +912,13 @@ VectorOpResult VectorHandler::PersistIndex(const std::string &name, bool force)
         return VectorOpResult::INDEX_NOT_EXIST;
     }
 
-    // 4. Truncate the log up to the current tail, this will also acquire
+    // 4. Truncate all sharded logs up to the current tail, this will also acquire
     // write intent on log object which blocks other writes to the log/vector
     // index.
     std::string log_name = "vector_index:" + name;
     uint64_t log_count_after_truncate;
-    uint64_t truncate_to_id = UINT64_MAX;
-    LogError truncate_result = LogObject::truncate_log(
-        log_name, truncate_to_id, log_count_after_truncate, txm);
+    LogError truncate_result = LogObject::truncate_all_sharded_logs(
+        log_name, VECTOR_INDEX_LOG_SHARD_COUNT, log_count_after_truncate, txm);
     if (truncate_result != LogError::SUCCESS)
     {
         AbortTx(txm);
@@ -969,7 +957,6 @@ VectorOpResult VectorHandler::PersistIndex(const std::string &name, bool force)
     }
     // 8. Update metadata with new file path and persistence info
     metadata.SetFilePath(new_file_path);
-    metadata.SetLastPersistedSequenceId(truncate_to_id);
     metadata.SetLastPersistTs(LocalCcShards::ClockTs());
     // 9. Encode updated metadata
     std::string encoded_metadata;
