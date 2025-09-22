@@ -156,7 +156,7 @@ inline Algorithm string_to_algorithm(const std::string_view &sv)
  * @brief Convert string to persist strategy enum
  *
  * @param sv String view representation of the persist strategy
- * @return Persist strategy enum value, defaults to MANUAL if string is invalid
+ * @return Persist strategy enum value
  */
 inline PersistStrategy string_to_persist_strategy(const std::string_view &sv)
 {

@@ -19829,7 +19829,7 @@ std::tuple<bool, CreateVecIndexCommand> ParseCreateVecIndexCommand(
     // Handle threshold parameter based on persist strategy
     bool requires_threshold =
         (persist_strategy == EloqVec::PersistStrategy::EVERY_N);
-    bool has_threshold = stringcomp("threshold", args[pos++], 1);
+    bool has_threshold = stringcomp("threshold", args[pos], 1);
     // EVERY_N strategy requires threshold parameter
     if (requires_threshold && !has_threshold)
     {
@@ -19839,6 +19839,7 @@ std::tuple<bool, CreateVecIndexCommand> ParseCreateVecIndexCommand(
     // Parse threshold if present
     if (has_threshold)
     {
+        pos++;
         bool parse_success =
             string2ll(args[pos].data(), args[pos].size(), threshold);
         // Validate threshold for EVERY_N strategy
@@ -20022,7 +20023,7 @@ void InfoVecIndexCommand::OutputResult(OutputHandler *reply,
         reply->OnString("metric");
         reply->OnString(
             EloqVec::distance_metric_to_string(metadata_.VecMetric()));
-        reply->OnString("buffer_threshold");
+        reply->OnString("threshold");
         reply->OnString(std::to_string(metadata_.PersistThreshold()));
         // algorithm parameters
         for (const auto &param : alg_params)
