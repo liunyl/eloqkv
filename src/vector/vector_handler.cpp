@@ -1070,6 +1070,26 @@ VectorOpResult VectorHandler::ApplyLogItems(
     std::vector<uint64_t> insert_ids;
     insert_vecs.reserve(log_items.size());
     insert_ids.reserve(log_items.size());
+
+    auto apply_batch_add = [&]() -> bool
+    {
+        if (insert_ids.size() > 0)
+        {
+            assert(insert_vecs.size() == insert_ids.size());
+            auto add_result = index_sptr->add_batch(insert_vecs, insert_ids);
+            if (add_result.error != VectorOpResult::SUCCEED)
+            {
+                LOG(ERROR) << "ApplyLogItems: Failed to insert vector with "
+                              "batch size: "
+                           << insert_vecs.size();
+                return false;
+            }
+            insert_vecs.clear();
+            insert_ids.clear();
+        }
+        return true;
+    };
+
     for (const auto &item : log_items)
     {
         switch (item.operation_type)
@@ -1083,6 +1103,12 @@ VectorOpResult VectorHandler::ApplyLogItems(
         }
         case LogOperationType::UPDATE:
         {
+            // Apply batch add first
+            if (!apply_batch_add())
+            {
+                return VectorOpResult::INDEX_LOG_OP_FAILED;
+            }
+
             update_vec.clear();
             deserialize_vector(item.value, update_vec);
             uint64_t id = std::stoull(item.key);
@@ -1097,6 +1123,12 @@ VectorOpResult VectorHandler::ApplyLogItems(
         }
         case LogOperationType::DELETE:
         {
+            // Apply batch add first
+            if (!apply_batch_add())
+            {
+                return VectorOpResult::INDEX_LOG_OP_FAILED;
+            }
+
             auto delete_result = index_sptr->remove(std::stoull(item.key));
             if (delete_result.error != VectorOpResult::SUCCEED)
             {
@@ -1115,18 +1147,10 @@ VectorOpResult VectorHandler::ApplyLogItems(
         }
     }
 
-    // Batch add the vector for insert
-    if (insert_ids.size() > 0)
+    // Apply the remaining batch add for insert
+    if (!apply_batch_add())
     {
-        assert(insert_vecs.size() == insert_ids.size());
-        auto insert_result = index_sptr->add_batch(insert_vecs, insert_ids);
-        if (insert_result.error != VectorOpResult::SUCCEED)
-        {
-            LOG(ERROR)
-                << "ApplyLogItems: Failed to insert vector with batch size: "
-                << insert_vecs.size();
-            return VectorOpResult::INDEX_LOG_OP_FAILED;
-        }
+        return VectorOpResult::INDEX_LOG_OP_FAILED;
     }
 
     return VectorOpResult::SUCCEED;
