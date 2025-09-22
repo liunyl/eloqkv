@@ -190,17 +190,31 @@ std::string LogObject::get_log_item_key(const std::string &log_name,
 
 // ===== SHARDED LOG HELPER FUNCTIONS =====
 
-uint32_t LogObject::get_shard_id(const std::string &shard_key, uint32_t num_shards)
+uint32_t LogObject::get_shard_id(const std::string &shard_key,
+                                 uint32_t num_shards)
 {
-    if (num_shards == 0) {
+    if (num_shards == 0)
+    {
         return 0;  // Avoid division by zero
     }
-    
-    std::hash<std::string> hasher;
-    return hasher(shard_key) % num_shards;
+
+    // FNV-1a hash implementation for stable 64-bit hashing
+    const uint64_t fnv_offset_basis = 14695981039346656037ULL;
+    const uint64_t fnv_prime = 1099511628211ULL;
+
+    uint64_t fnv64_hash = fnv_offset_basis;
+    for (char c : shard_key)
+    {
+        fnv64_hash ^= static_cast<uint8_t>(c);
+        fnv64_hash *= fnv_prime;
+    }
+
+    return static_cast<uint32_t>(fnv64_hash %
+                                 static_cast<uint64_t>(num_shards));
 }
 
-std::string LogObject::get_shard_log_name(const std::string &base_log_name, uint32_t shard_id)
+std::string LogObject::get_shard_log_name(const std::string &base_log_name,
+                                          uint32_t shard_id)
 {
     return base_log_name + ":shard_" + std::to_string(shard_id);
 }
@@ -957,8 +971,8 @@ log_metadata_t LogObject::get_stats(const std::string &log_name,
 // ===== SHARDED LOG IMPLEMENTATIONS =====
 
 LogError LogObject::create_sharded_logs(const std::string &base_log_name,
-                                       uint32_t num_shards,
-                                       txservice::TransactionExecution *txm)
+                                        uint32_t num_shards,
+                                        txservice::TransactionExecution *txm)
 {
     // Require non-null transaction execution context
     if (txm == nullptr)
@@ -972,10 +986,11 @@ LogError LogObject::create_sharded_logs(const std::string &base_log_name,
         return LogError::INVALID_PARAMETER;
     }
 
-    // Create all shard logs in parallel within transaction
+    // Create all shard logs sequentially within transaction
     for (uint32_t shard_id = 0; shard_id < num_shards; ++shard_id)
     {
-        std::string shard_log_name = get_shard_log_name(base_log_name, shard_id);
+        std::string shard_log_name =
+            get_shard_log_name(base_log_name, shard_id);
         LogError result = create_log(shard_log_name, txm);
         if (result != LogError::SUCCESS)
         {
@@ -987,8 +1002,8 @@ LogError LogObject::create_sharded_logs(const std::string &base_log_name,
 }
 
 LogError LogObject::remove_sharded_logs(const std::string &base_log_name,
-                                       uint32_t num_shards,
-                                       txservice::TransactionExecution *txm)
+                                        uint32_t num_shards,
+                                        txservice::TransactionExecution *txm)
 {
     // Require non-null transaction execution context
     if (txm == nullptr)
@@ -1002,10 +1017,11 @@ LogError LogObject::remove_sharded_logs(const std::string &base_log_name,
         return LogError::INVALID_PARAMETER;
     }
 
-    // Remove all shard logs in parallel within transaction
+    // Remove all shard logs sequentially within transaction
     for (uint32_t shard_id = 0; shard_id < num_shards; ++shard_id)
     {
-        std::string shard_log_name = get_shard_log_name(base_log_name, shard_id);
+        std::string shard_log_name =
+            get_shard_log_name(base_log_name, shard_id);
         LogError result = remove_log(shard_log_name, txm);
         if (result != LogError::SUCCESS)
         {
@@ -1017,12 +1033,12 @@ LogError LogObject::remove_sharded_logs(const std::string &base_log_name,
 }
 
 LogError LogObject::append_log_sharded(const std::string &base_log_name,
-                                      const std::string &shard_key,
-                                      uint32_t num_shards,
-                                      std::vector<log_item_t> &items,
-                                      uint64_t &log_id,
-                                      uint64_t &log_count,
-                                      txservice::TransactionExecution *txm)
+                                       const std::string &shard_key,
+                                       uint32_t num_shards,
+                                       std::vector<log_item_t> &items,
+                                       uint64_t &log_id,
+                                       uint64_t &log_count,
+                                       txservice::TransactionExecution *txm)
 {
     // Require non-null transaction execution context
     if (txm == nullptr)
@@ -1044,10 +1060,11 @@ LogError LogObject::append_log_sharded(const std::string &base_log_name,
     return append_log(shard_log_name, items, log_id, log_count, txm);
 }
 
-LogError LogObject::truncate_all_sharded_logs(const std::string &base_log_name,
-                                             uint32_t num_shards,
-                                             uint64_t &total_log_count,
-                                             txservice::TransactionExecution *txm)
+LogError LogObject::truncate_all_sharded_logs(
+    const std::string &base_log_name,
+    uint32_t num_shards,
+    uint64_t &total_log_count,
+    txservice::TransactionExecution *txm)
 {
     // Require non-null transaction execution context
     if (txm == nullptr)
@@ -1063,71 +1080,22 @@ LogError LogObject::truncate_all_sharded_logs(const std::string &base_log_name,
 
     total_log_count = 0;
 
-    // Truncate all shards in parallel within transaction
+    // Truncate all shards sequentially within transaction
     for (uint32_t shard_id = 0; shard_id < num_shards; ++shard_id)
     {
-        std::string shard_log_name = get_shard_log_name(base_log_name, shard_id);
+        std::string shard_log_name =
+            get_shard_log_name(base_log_name, shard_id);
         uint64_t shard_log_count = 0;
         uint64_t shard_to_id = UINT64_MAX;
 
-        LogError result = truncate_log(shard_log_name, shard_to_id, shard_log_count, txm);
+        LogError result =
+            truncate_log(shard_log_name, shard_to_id, shard_log_count, txm);
         if (result != LogError::SUCCESS)
         {
             return result;
         }
 
         total_log_count += shard_log_count;
-    }
-
-    return LogError::SUCCESS;
-}
-
-LogError LogObject::get_sharded_log_stats(const std::string &base_log_name,
-                                         uint32_t num_shards,
-                                         log_metadata_t &aggregated_stats,
-                                         txservice::TransactionExecution *txm)
-{
-    // Require non-null transaction execution context
-    if (txm == nullptr)
-    {
-        return LogError::INVALID_PARAMETER;
-    }
-
-    // Validate parameters
-    if (num_shards == 0)
-    {
-        return LogError::INVALID_PARAMETER;
-    }
-
-    // Initialize aggregated stats
-    aggregated_stats = log_metadata_t();
-
-    // Collect stats from all shards
-    for (uint32_t shard_id = 0; shard_id < num_shards; ++shard_id)
-    {
-        std::string shard_log_name = get_shard_log_name(base_log_name, shard_id);
-        log_metadata_t shard_stats = get_stats(shard_log_name, txm);
-
-        // Aggregate statistics
-        aggregated_stats.total_items += shard_stats.total_items;
-        
-        // Update head sequence ID (minimum across all shards)
-        if (shard_id == 0 || shard_stats.head_item_sequence_id < aggregated_stats.head_item_sequence_id)
-        {
-            aggregated_stats.head_item_sequence_id = shard_stats.head_item_sequence_id;
-        }
-        
-        // Update tail sequence ID (maximum across all shards)
-        if (shard_stats.tail_item_sequence_id > aggregated_stats.tail_item_sequence_id)
-        {
-            aggregated_stats.tail_item_sequence_id = shard_stats.tail_item_sequence_id;
-        }
-        
-        // Update next ID (maximum across all shards)
-        if (shard_stats.next_id > aggregated_stats.next_id)
-        {
-            aggregated_stats.next_id = shard_stats.next_id;
-        }
     }
 
     return LogError::SUCCESS;

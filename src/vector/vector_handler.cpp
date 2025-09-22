@@ -258,7 +258,9 @@ void VectorHandler::InitHandlerInstance(
         [tx_service, vector_index_worker_pool, &vector_index_data_path]()
         {
             vector_handler_instance = std::unique_ptr<VectorHandler>(
-                new VectorHandler(tx_service, vector_index_worker_pool, vector_index_data_path));
+                new VectorHandler(tx_service,
+                                  vector_index_worker_pool,
+                                  vector_index_data_path));
         });
 }
 
@@ -354,8 +356,8 @@ VectorOpResult VectorHandler::Create(const IndexConfig &idx_spec)
     }
 
     // 4. create the sharded log objects
-    LogError log_err =
-        LogObject::create_sharded_logs(build_log_name(idx_spec.name), VECTOR_INDEX_LOG_SHARD_COUNT, txm);
+    LogError log_err = LogObject::create_sharded_logs(
+        build_log_name(idx_spec.name), VECTOR_INDEX_LOG_SHARD_COUNT, txm);
     if (log_err != LogError::SUCCESS)
     {
         AbortTx(txm);
@@ -436,7 +438,8 @@ VectorOpResult VectorHandler::Drop(const std::string &name)
     }
 
     // 5. delete the sharded log objects
-    LogError log_err = LogObject::remove_sharded_logs(build_log_name(name), VECTOR_INDEX_LOG_SHARD_COUNT, txm);
+    LogError log_err = LogObject::remove_sharded_logs(
+        build_log_name(name), VECTOR_INDEX_LOG_SHARD_COUNT, txm);
     if (log_err != LogError::SUCCESS)
     {
         AbortTx(txm);
@@ -593,8 +596,14 @@ VectorOpResult VectorHandler::Add(const std::string &name,
     std::vector<log_item_t> log_items;
     log_items.emplace_back(
         LogOperationType::INSERT, std::to_string(id), serialized_vector, ts, 0);
-    LogError log_err = LogObject::append_log_sharded(
-        build_log_name(name), std::to_string(id), VECTOR_INDEX_LOG_SHARD_COUNT, log_items, log_id, log_count, txm);
+    LogError log_err =
+        LogObject::append_log_sharded(build_log_name(name),
+                                      std::to_string(id),
+                                      VECTOR_INDEX_LOG_SHARD_COUNT,
+                                      log_items,
+                                      log_id,
+                                      log_count,
+                                      txm);
     if (log_err != LogError::SUCCESS)
     {
         return VectorOpResult::INDEX_LOG_OP_FAILED;
@@ -605,9 +614,10 @@ VectorOpResult VectorHandler::Add(const std::string &name,
     {
         // Persist the index if it has enough items
         std::lock_guard<std::shared_mutex> lock(vec_indexes_mutex_);
+        uint64_t estimate_log_count = log_count * VECTOR_INDEX_LOG_SHARD_COUNT;
         if (pending_persist_indexes_.find(name) ==
                 pending_persist_indexes_.end() &&
-            log_count >= index_sptr->get_buffer_threshold())
+            estimate_log_count >= index_sptr->get_buffer_threshold())
         {
             pending_persist_indexes_.insert(name);
             vector_index_worker_pool_->SubmitWork(
@@ -661,8 +671,14 @@ VectorOpResult VectorHandler::Update(const std::string &name,
     std::vector<log_item_t> log_items;
     log_items.emplace_back(
         LogOperationType::UPDATE, std::to_string(id), serialized_vector, ts, 0);
-    LogError log_err = LogObject::append_log_sharded(
-        build_log_name(name), std::to_string(id), VECTOR_INDEX_LOG_SHARD_COUNT, log_items, log_id, log_count, txm);
+    LogError log_err =
+        LogObject::append_log_sharded(build_log_name(name),
+                                      std::to_string(id),
+                                      VECTOR_INDEX_LOG_SHARD_COUNT,
+                                      log_items,
+                                      log_id,
+                                      log_count,
+                                      txm);
     if (log_err != LogError::SUCCESS)
     {
         return VectorOpResult::INDEX_LOG_OP_FAILED;
@@ -674,10 +690,11 @@ VectorOpResult VectorHandler::Update(const std::string &name,
     if (update_result.error == VectorOpResult::SUCCEED)
     {
         // Persist the index if it has enough items
+        uint64_t estimate_log_count = log_count * VECTOR_INDEX_LOG_SHARD_COUNT;
         std::lock_guard<std::shared_mutex> lock(vec_indexes_mutex_);
         if (pending_persist_indexes_.find(name) ==
                 pending_persist_indexes_.end() &&
-            log_count >= index_sptr->get_buffer_threshold())
+            estimate_log_count >= index_sptr->get_buffer_threshold())
         {
             pending_persist_indexes_.insert(name);
             vector_index_worker_pool_->SubmitWork(
@@ -733,8 +750,14 @@ VectorOpResult VectorHandler::Delete(const std::string &name,
                            serialized_empty_vec,
                            ts,
                            0);
-    LogError log_err = LogObject::append_log_sharded(
-        build_log_name(name), std::to_string(id), VECTOR_INDEX_LOG_SHARD_COUNT, log_items, log_id, log_count, txm);
+    LogError log_err =
+        LogObject::append_log_sharded(build_log_name(name),
+                                      std::to_string(id),
+                                      VECTOR_INDEX_LOG_SHARD_COUNT,
+                                      log_items,
+                                      log_id,
+                                      log_count,
+                                      txm);
     if (log_err != LogError::SUCCESS)
     {
         return VectorOpResult::INDEX_LOG_OP_FAILED;
@@ -747,9 +770,10 @@ VectorOpResult VectorHandler::Delete(const std::string &name,
     {
         // Persist the index if it has enough items
         std::lock_guard<std::shared_mutex> lock(vec_indexes_mutex_);
+        uint64_t estimate_log_count = log_count * VECTOR_INDEX_LOG_SHARD_COUNT;
         if (pending_persist_indexes_.find(name) ==
                 pending_persist_indexes_.end() &&
-            log_count >= index_sptr->get_buffer_threshold())
+            estimate_log_count >= index_sptr->get_buffer_threshold())
         {
             pending_persist_indexes_.insert(name);
             vector_index_worker_pool_->SubmitWork(
@@ -912,10 +936,10 @@ VectorOpResult VectorHandler::PersistIndex(const std::string &name, bool force)
         return VectorOpResult::INDEX_NOT_EXIST;
     }
 
-    // 4. Truncate all sharded logs up to the current tail, this will also acquire
-    // write intent on log object which blocks other writes to the log/vector
-    // index.
-    std::string log_name = "vector_index:" + name;
+    // 4. Truncate all sharded logs up to the current tail, this will also
+    // acquire write intent on log object which blocks other writes to the
+    // log/vector index.
+    std::string log_name = build_log_name(name);
     uint64_t log_count_after_truncate;
     LogError truncate_result = LogObject::truncate_all_sharded_logs(
         log_name, VECTOR_INDEX_LOG_SHARD_COUNT, log_count_after_truncate, txm);
