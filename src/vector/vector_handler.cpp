@@ -94,7 +94,7 @@ void VectorMetadata::Encode(std::string &encoded_str) const
      * The format of the encoded metadata:
      * nameLen | name | dimension | algorithm | metric | paramCount | key1Len |
      * key1 | value1Len | value1 | ... | filePathLen | filePath |
-     * bufferThreshold | size | createdTs | lastPersistTs
+     * bufferThreshold | createdTs | lastPersistTs
      * 1. nameLen is a 2-byte integer representing the length of the name. 2.
      * name is a string. 3. dimension is a 8-byte integer representing the
      * dimension. 4. algorithm is a 1-byte integer representing the
@@ -104,9 +104,8 @@ void VectorMetadata::Encode(std::string &encoded_str) const
      * valueLen (4-byte) | value (string). 8. filePathLen is a 4-byte integer
      * representing the length of the file path. 9. filePath is a string. 10.
      * bufferThreshold is a 8-byte integer representing the buffer
-     * threshold. 11. size is a 8-byte integer representing the size of the
-     * index. 12. createdTs is a 8-byte integer representing the creation
-     * timestamp. 13. lastPersistTs is a 8-byte integer representing the last
+     * threshold. 11. createdTs is a 8-byte integer representing the creation
+     * timestamp. 12. lastPersistTs is a 8-byte integer representing the last
      * persist timestamp.
      */
     uint16_t name_len = static_cast<uint16_t>(name_.size());
@@ -159,10 +158,6 @@ void VectorMetadata::Encode(std::string &encoded_str) const
 
     len_sizeof = sizeof(size_t);
     val_ptr = reinterpret_cast<const char *>(&buffer_threshold_);
-    encoded_str.append(val_ptr, len_sizeof);
-
-    len_sizeof = sizeof(size_t);
-    val_ptr = reinterpret_cast<const char *>(&size_);
     encoded_str.append(val_ptr, len_sizeof);
 
     len_sizeof = sizeof(uint64_t);
@@ -231,9 +226,6 @@ void VectorMetadata::Decode(const char *buf,
     offset += file_path_len;
 
     buffer_threshold_ = *reinterpret_cast<const size_t *>(buf + offset);
-    offset += sizeof(size_t);
-
-    size_ = *reinterpret_cast<const size_t *>(buf + offset);
     offset += sizeof(size_t);
 
     created_ts_ = *reinterpret_cast<const uint64_t *>(buf + offset);

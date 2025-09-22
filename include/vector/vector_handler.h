@@ -65,11 +65,6 @@ public:
         return alg_params_;
     }
 
-    size_t Size() const
-    {
-        return size_;
-    }
-
     uint64_t CreatedTs() const
     {
         return created_ts_;
@@ -113,8 +108,6 @@ private:
     std::unordered_map<std::string, std::string> alg_params_;
     std::string file_path_{""};
     size_t buffer_threshold_{10000};
-    // Total number of vectors in the index
-    size_t size_{0};
     uint64_t created_ts_{0};
     uint64_t last_persist_ts_{0};
 };
