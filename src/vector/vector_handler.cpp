@@ -1058,7 +1058,8 @@ VectorOpResult VectorHandler::ApplyLogItems(
 {
     std::string log_name = build_log_name(idx_name);
     std::vector<log_item_t> log_items;
-    if (LogObject::scan_log(log_name, to_id, log_items, txm) !=
+    if (LogObject::scan_sharded_log(
+            log_name, VECTOR_INDEX_LOG_SHARD_COUNT, log_items, txm) !=
         LogError::SUCCESS)
     {
         LOG(ERROR) << "Failed to scan log items for index: " << idx_name;
