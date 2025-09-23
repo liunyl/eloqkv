@@ -19928,16 +19928,6 @@ std::tuple<bool, CreateVecIndexCommand> ParseCreateVecIndexCommand(
                                   std::move(alg_params))};
 }
 
-bool CreateVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
-                                    RedisConnectionContext *ctx,
-                                    const txservice::TableName *table,
-                                    txservice::TransactionExecution *txm,
-                                    OutputHandler *output,
-                                    bool auto_commit)
-{
-    return redis_impl->ExecuteCommand(ctx, this, output);
-}
-
 void CreateVecIndexCommand::OutputResult(OutputHandler *reply,
                                          RedisConnectionContext *ctx) const
 {
@@ -19996,16 +19986,6 @@ std::tuple<bool, DropVecIndexCommand> ParseDropVecIndexCommand(
     return {true, DropVecIndexCommand(index_name)};
 }
 
-bool InfoVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
-                                  RedisConnectionContext *ctx,
-                                  const txservice::TableName *table,
-                                  txservice::TransactionExecution *txm,
-                                  OutputHandler *output,
-                                  bool auto_commit)
-{
-    return redis_impl->ExecuteCommand(ctx, this, output);
-}
-
 void InfoVecIndexCommand::OutputResult(OutputHandler *reply,
                                        RedisConnectionContext *ctx) const
 {
@@ -20041,16 +20021,6 @@ void InfoVecIndexCommand::OutputResult(OutputHandler *reply,
     {
         reply->OnError(redis_get_error_messages(result_.err_code_));
     }
-}
-
-bool DropVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
-                                  RedisConnectionContext *ctx,
-                                  const txservice::TableName *table,
-                                  txservice::TransactionExecution *txm,
-                                  OutputHandler *output,
-                                  bool auto_commit)
-{
-    return redis_impl->ExecuteCommand(ctx, this, output);
 }
 
 void DropVecIndexCommand::OutputResult(OutputHandler *reply,
@@ -20123,16 +20093,6 @@ std::tuple<bool, AddVecIndexCommand> ParseAddVecIndexCommand(
 
     // Create command with parsed parameters
     return {true, AddVecIndexCommand(index_name, key, std::move(vector_data))};
-}
-
-bool AddVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
-                                 RedisConnectionContext *ctx,
-                                 const txservice::TableName *table,
-                                 txservice::TransactionExecution *txm,
-                                 OutputHandler *output,
-                                 bool auto_commit)
-{
-    return redis_impl->ExecuteCommand(ctx, this, output);
 }
 
 void AddVecIndexCommand::OutputResult(OutputHandler *reply,
@@ -20208,16 +20168,6 @@ std::tuple<bool, UpdateVecIndexCommand> ParseUpdateVecIndexCommand(
             UpdateVecIndexCommand(index_name, key, std::move(vector_data))};
 }
 
-bool UpdateVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
-                                    RedisConnectionContext *ctx,
-                                    const txservice::TableName *table,
-                                    txservice::TransactionExecution *txm,
-                                    OutputHandler *output,
-                                    bool auto_commit)
-{
-    return redis_impl->ExecuteCommand(ctx, this, output);
-}
-
 void UpdateVecIndexCommand::OutputResult(OutputHandler *reply,
                                          RedisConnectionContext *ctx) const
 {
@@ -20265,16 +20215,6 @@ std::tuple<bool, DeleteVecIndexCommand> ParseDeleteVecIndexCommand(
 
     // Create command with parsed parameters
     return {true, DeleteVecIndexCommand(index_name, key)};
-}
-
-bool DeleteVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
-                                    RedisConnectionContext *ctx,
-                                    const txservice::TableName *table,
-                                    txservice::TransactionExecution *txm,
-                                    OutputHandler *output,
-                                    bool auto_commit)
-{
-    return redis_impl->ExecuteCommand(ctx, this, output);
 }
 
 void DeleteVecIndexCommand::OutputResult(OutputHandler *reply,
@@ -20348,16 +20288,6 @@ std::tuple<bool, SearchVecIndexCommand> ParseSearchVecIndexCommand(
     // Create command with parsed parameters
     return {true,
             SearchVecIndexCommand(index_name, std::move(vector_data), k_count)};
-}
-
-bool SearchVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
-                                    RedisConnectionContext *ctx,
-                                    const txservice::TableName *table,
-                                    txservice::TransactionExecution *txm,
-                                    OutputHandler *output,
-                                    bool auto_commit)
-{
-    return redis_impl->ExecuteCommand(ctx, this, output);
 }
 
 void SearchVecIndexCommand::OutputResult(OutputHandler *reply,
