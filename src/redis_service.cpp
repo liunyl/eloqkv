@@ -6539,10 +6539,7 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
                     cmd->dimensions_,
                     cmd->algorithm_,
                     cmd->metric_type_,
-<<<<<<< HEAD
                     cmd->persist_threshold_,
-=======
->>>>>>> e560a26 (Using separate txm for vector handler)
                     EloqVec::VectorHandler::Instance().VectorIndexDataPath(),
                     std::move(cmd->alg_params_));
                 res = EloqVec::VectorHandler::Instance().Create(index_config);

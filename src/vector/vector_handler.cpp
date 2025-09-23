@@ -636,10 +636,21 @@ VectorOpResult VectorHandler::Add(const std::string &name,
     }
     // 4. Add the vector to the index
     auto add_result = index_sptr->add(vector, id);
-    if (add_result.error == VectorOpResult::SUCCEED &&
-        index_sptr->get_persist_threshold() != -1)
+    if (add_result.error == VectorOpResult::SUCCEED)
     {
-        CommitTx(txm);
+        auto res_pair = CommitTx(txm);
+        if (!res_pair.first)
+        {
+            // Remove the vector from the index cache.
+            index_sptr->remove(id);
+            return VectorOpResult::INDEX_ADD_FAILED;
+        }
+
+        if (index_sptr->get_persist_threshold() == -1)
+        {
+            // No need to persist the index.
+            return VectorOpResult::SUCCEED;
+        }
 
         // Persist the index if it has enough items
         std::lock_guard<std::shared_mutex> lock(vec_indexes_mutex_);
@@ -727,12 +738,32 @@ VectorOpResult VectorHandler::Update(const std::string &name,
     }
 
     // 4. Update the vector in the index
-    auto update_result = index_sptr->update(vector, id);
-
-    if (update_result.error == VectorOpResult::SUCCEED &&
-        index_sptr->get_persist_threshold() != -1)
+    std::vector<float> update_vec;
+    auto idx_res = index_sptr->get(id, update_vec);
+    if (idx_res.error != VectorOpResult::SUCCEED || update_vec.size() == 0)
     {
-        CommitTx(txm);
+        // The index operation failed or the vector with this id does not exist.
+        AbortTx(txm);
+        return idx_res.error;
+    }
+
+    idx_res = index_sptr->update(vector, id);
+    if (idx_res.error == VectorOpResult::SUCCEED)
+    {
+        auto res_pair = CommitTx(txm);
+        if (!res_pair.first)
+        {
+            // Restore the vector to the index cache.
+            index_sptr->update(update_vec, id);
+            return VectorOpResult::INDEX_UPDATE_FAILED;
+        }
+
+        if (index_sptr->get_persist_threshold() == -1)
+        {
+            // No need to persist the index.
+            return VectorOpResult::SUCCEED;
+        }
+
         // Persist the index if it has enough items
         uint64_t estimate_log_count = log_count * VECTOR_INDEX_LOG_SHARD_COUNT;
         std::lock_guard<std::shared_mutex> lock(vec_indexes_mutex_);
@@ -751,7 +782,7 @@ VectorOpResult VectorHandler::Update(const std::string &name,
         AbortTx(txm);
     }
 
-    return update_result.error;
+    return idx_res.error;
 }
 
 VectorOpResult VectorHandler::Delete(const std::string &name, uint64_t id)
@@ -820,12 +851,32 @@ VectorOpResult VectorHandler::Delete(const std::string &name, uint64_t id)
     }
 
     // 4. Delete the vector from the index
-    auto remove_result = index_sptr->remove(id);
-
-    if (remove_result.error == VectorOpResult::SUCCEED &&
-        index_sptr->get_persist_threshold() != -1)
+    std::vector<float> deleted_vector;
+    auto idx_res = index_sptr->get(id, deleted_vector);
+    if (idx_res.error != VectorOpResult::SUCCEED || deleted_vector.size() == 0)
     {
-        CommitTx(txm);
+        // The index operation failed or the vector with this id does not exist.
+        AbortTx(txm);
+        return idx_res.error;
+    }
+
+    idx_res = index_sptr->remove(id);
+    if (idx_res.error == VectorOpResult::SUCCEED)
+    {
+        auto res_pair = CommitTx(txm);
+        if (!res_pair.first)
+        {
+            // Restore the vector to the index cache.
+            index_sptr->add(deleted_vector, id);
+            return VectorOpResult::INDEX_DELETE_FAILED;
+        }
+
+        if (index_sptr->get_persist_threshold() == -1)
+        {
+            // No need to persist the index.
+            return VectorOpResult::SUCCEED;
+        }
+
         // Persist the index if it has enough items
         std::lock_guard<std::shared_mutex> lock(vec_indexes_mutex_);
         uint64_t estimate_log_count = log_count * VECTOR_INDEX_LOG_SHARD_COUNT;
@@ -844,7 +895,7 @@ VectorOpResult VectorHandler::Delete(const std::string &name, uint64_t id)
         AbortTx(txm);
     }
 
-    return remove_result.error;
+    return idx_res.error;
 }
 
 std::pair<std::shared_ptr<VectorIndex>, VectorOpResult>
