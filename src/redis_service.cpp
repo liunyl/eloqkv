@@ -6539,7 +6539,10 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
                     cmd->dimensions_,
                     cmd->algorithm_,
                     cmd->metric_type_,
+<<<<<<< HEAD
                     cmd->persist_threshold_,
+=======
+>>>>>>> e560a26 (Using separate txm for vector handler)
                     EloqVec::VectorHandler::Instance().VectorIndexDataPath(),
                     std::move(cmd->alg_params_));
                 res = EloqVec::VectorHandler::Instance().Create(index_config);
@@ -6561,10 +6564,8 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
 }
 
 bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
-                                      TransactionExecution *txm,
                                       InfoVecIndexCommand *cmd,
-                                      OutputHandler *output,
-                                      bool auto_commit)
+                                      OutputHandler *output)
 {
     if (vector_index_worker_pool_ == nullptr)
     {
@@ -6578,10 +6579,10 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
     {
         std::unique_lock<bthread::Mutex> lk(mux);
         vector_index_worker_pool_->SubmitWork(
-            [cmd, txm, &res, &mux, &cv, &finished]()
+            [cmd, &res, &mux, &cv, &finished]()
             {
                 res = EloqVec::VectorHandler::Instance().Info(
-                    cmd->index_name_.String(), txm, cmd->metadata_);
+                    cmd->index_name_.String(), cmd->metadata_);
                 std::unique_lock<bthread::Mutex> lk(mux);
                 finished = true;
                 cv.notify_one();
@@ -6591,22 +6592,10 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
             cv.wait(lk);
         }
     }
-    if (res == EloqVec::VectorOpResult::SUCCEED)
-    {
-        if (auto_commit)
-        {
-            CommitTx(txm);
-        }
-        cmd->result_.err_code_ = RD_OK;
-    }
-    else
-    {
-        if (auto_commit)
-        {
-            AbortTx(txm);
-        }
-        cmd->result_.err_code_ = RD_ERR_VECTOR_INDX_INFO_FAILED;
-    }
+
+    cmd->result_.err_code_ = res == EloqVec::VectorOpResult::SUCCEED
+                                 ? RD_OK
+                                 : RD_ERR_VECTOR_INDX_INFO_FAILED;
     cmd->OutputResult(output, ctx);
     return true;
 }
@@ -6648,10 +6637,8 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
 }
 
 bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
-                                      TransactionExecution *txm,
                                       AddVecIndexCommand *cmd,
-                                      OutputHandler *output,
-                                      bool auto_commit)
+                                      OutputHandler *output)
 {
     if (vector_index_worker_pool_ == nullptr)
     {
@@ -6665,10 +6652,10 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
     {
         std::unique_lock<bthread::Mutex> lk(mux);
         vector_index_worker_pool_->SubmitWork(
-            [cmd, txm, &res, &mux, &cv, &finished]()
+            [cmd, &res, &mux, &cv, &finished]()
             {
                 res = EloqVec::VectorHandler::Instance().Add(
-                    cmd->index_name_.String(), cmd->key_, cmd->vector_, txm);
+                    cmd->index_name_.String(), cmd->key_, cmd->vector_);
                 std::unique_lock<bthread::Mutex> lk(mux);
                 finished = true;
                 cv.notify_one();
@@ -6678,31 +6665,17 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
             cv.wait(lk);
         }
     }
-    if (res == EloqVec::VectorOpResult::SUCCEED)
-    {
-        if (auto_commit)
-        {
-            CommitTx(txm);
-        }
-        cmd->result_.err_code_ = RD_OK;
-    }
-    else
-    {
-        if (auto_commit)
-        {
-            AbortTx(txm);
-        }
-        cmd->result_.err_code_ = RD_ERR_VECTOR_INDX_ADD_FAILED;
-    }
+
+    cmd->result_.err_code_ = res == EloqVec::VectorOpResult::SUCCEED
+                                 ? RD_OK
+                                 : RD_ERR_VECTOR_INDX_ADD_FAILED;
     cmd->OutputResult(output, ctx);
     return true;
 }
 
 bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
-                                      TransactionExecution *txm,
                                       UpdateVecIndexCommand *cmd,
-                                      OutputHandler *output,
-                                      bool auto_commit)
+                                      OutputHandler *output)
 {
     if (vector_index_worker_pool_ == nullptr)
     {
@@ -6716,10 +6689,10 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
     {
         std::unique_lock<bthread::Mutex> lk(mux);
         vector_index_worker_pool_->SubmitWork(
-            [cmd, txm, &res, &mux, &cv, &finished]()
+            [cmd, &res, &mux, &cv, &finished]()
             {
                 res = EloqVec::VectorHandler::Instance().Update(
-                    cmd->index_name_.String(), cmd->key_, cmd->vector_, txm);
+                    cmd->index_name_.String(), cmd->key_, cmd->vector_);
                 std::unique_lock<bthread::Mutex> lk(mux);
                 finished = true;
                 cv.notify_one();
@@ -6729,31 +6702,17 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
             cv.wait(lk);
         }
     }
-    if (res == EloqVec::VectorOpResult::SUCCEED)
-    {
-        if (auto_commit)
-        {
-            CommitTx(txm);
-        }
-        cmd->result_.err_code_ = RD_OK;
-    }
-    else
-    {
-        if (auto_commit)
-        {
-            AbortTx(txm);
-        }
-        cmd->result_.err_code_ = RD_ERR_VECTOR_INDX_UPDATE_FAILED;
-    }
+
+    cmd->result_.err_code_ = res == EloqVec::VectorOpResult::SUCCEED
+                                 ? RD_OK
+                                 : RD_ERR_VECTOR_INDX_UPDATE_FAILED;
     cmd->OutputResult(output, ctx);
     return true;
 }
 
 bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
-                                      TransactionExecution *txm,
                                       DeleteVecIndexCommand *cmd,
-                                      OutputHandler *output,
-                                      bool auto_commit)
+                                      OutputHandler *output)
 {
     if (vector_index_worker_pool_ == nullptr)
     {
@@ -6767,10 +6726,10 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
     {
         std::unique_lock<bthread::Mutex> lk(mux);
         vector_index_worker_pool_->SubmitWork(
-            [cmd, txm, &res, &mux, &cv, &finished]()
+            [cmd, &res, &mux, &cv, &finished]()
             {
                 res = EloqVec::VectorHandler::Instance().Delete(
-                    cmd->index_name_.String(), cmd->key_, txm);
+                    cmd->index_name_.String(), cmd->key_);
                 std::unique_lock<bthread::Mutex> lk(mux);
                 finished = true;
                 cv.notify_one();
@@ -6780,31 +6739,17 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
             cv.wait(lk);
         }
     }
-    if (res == EloqVec::VectorOpResult::SUCCEED)
-    {
-        if (auto_commit)
-        {
-            CommitTx(txm);
-        }
-        cmd->result_.err_code_ = RD_OK;
-    }
-    else
-    {
-        if (auto_commit)
-        {
-            AbortTx(txm);
-        }
-        cmd->result_.err_code_ = RD_ERR_VECTOR_INDX_DELETE_FAILED;
-    }
+
+    cmd->result_.err_code_ = res == EloqVec::VectorOpResult::SUCCEED
+                                 ? RD_OK
+                                 : RD_ERR_VECTOR_INDX_DELETE_FAILED;
     cmd->OutputResult(output, ctx);
     return true;
 }
 
 bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
-                                      TransactionExecution *txm,
                                       SearchVecIndexCommand *cmd,
-                                      OutputHandler *output,
-                                      bool auto_commit)
+                                      OutputHandler *output)
 {
     if (vector_index_worker_pool_ == nullptr)
     {
@@ -6818,13 +6763,12 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
     {
         std::unique_lock<bthread::Mutex> lk(mux);
         vector_index_worker_pool_->SubmitWork(
-            [cmd, txm, &res, &mux, &cv, &finished]()
+            [cmd, &res, &mux, &cv, &finished]()
             {
                 res = EloqVec::VectorHandler::Instance().Search(
                     cmd->index_name_.String(),
                     cmd->vector_,
                     cmd->k_count_,
-                    txm,
                     cmd->search_res_);
                 std::unique_lock<bthread::Mutex> lk(mux);
                 finished = true;
@@ -6835,22 +6779,10 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
             cv.wait(lk);
         }
     }
-    if (res == EloqVec::VectorOpResult::SUCCEED)
-    {
-        if (auto_commit)
-        {
-            CommitTx(txm);
-        }
-        cmd->result_.err_code_ = RD_OK;
-    }
-    else
-    {
-        if (auto_commit)
-        {
-            AbortTx(txm);
-        }
-        cmd->result_.err_code_ = RD_ERR_VECTOR_INDX_SEARCH_FAILED;
-    }
+
+    cmd->result_.err_code_ = res == EloqVec::VectorOpResult::SUCCEED
+                                 ? RD_OK
+                                 : RD_ERR_VECTOR_INDX_SEARCH_FAILED;
     cmd->OutputResult(output, ctx);
     return true;
 }

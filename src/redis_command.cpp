@@ -20003,7 +20003,7 @@ bool InfoVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
                                   OutputHandler *output,
                                   bool auto_commit)
 {
-    return redis_impl->ExecuteCommand(ctx, txm, this, output, auto_commit);
+    return redis_impl->ExecuteCommand(ctx, this, output);
 }
 
 void InfoVecIndexCommand::OutputResult(OutputHandler *reply,
@@ -20012,7 +20012,7 @@ void InfoVecIndexCommand::OutputResult(OutputHandler *reply,
     if (result_.err_code_ == RD_OK)
     {
         auto &alg_params = metadata_.VecAlgParams();
-        size_t len = (7 + alg_params.size()) * 2;
+        size_t len = (6 + alg_params.size()) * 2;
         reply->OnArrayStart(len);
         reply->OnString("index_name");
         reply->OnString(index_name_.StringView());
@@ -20132,7 +20132,7 @@ bool AddVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
                                  OutputHandler *output,
                                  bool auto_commit)
 {
-    return redis_impl->ExecuteCommand(ctx, txm, this, output, auto_commit);
+    return redis_impl->ExecuteCommand(ctx, this, output);
 }
 
 void AddVecIndexCommand::OutputResult(OutputHandler *reply,
@@ -20215,7 +20215,7 @@ bool UpdateVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
                                     OutputHandler *output,
                                     bool auto_commit)
 {
-    return redis_impl->ExecuteCommand(ctx, txm, this, output, auto_commit);
+    return redis_impl->ExecuteCommand(ctx, this, output);
 }
 
 void UpdateVecIndexCommand::OutputResult(OutputHandler *reply,
@@ -20274,7 +20274,7 @@ bool DeleteVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
                                     OutputHandler *output,
                                     bool auto_commit)
 {
-    return redis_impl->ExecuteCommand(ctx, txm, this, output, auto_commit);
+    return redis_impl->ExecuteCommand(ctx, this, output);
 }
 
 void DeleteVecIndexCommand::OutputResult(OutputHandler *reply,
@@ -20357,7 +20357,7 @@ bool SearchVecIndexCommand::Execute(RedisServiceImpl *redis_impl,
                                     OutputHandler *output,
                                     bool auto_commit)
 {
-    return redis_impl->ExecuteCommand(ctx, txm, this, output, auto_commit);
+    return redis_impl->ExecuteCommand(ctx, this, output);
 }
 
 void SearchVecIndexCommand::OutputResult(OutputHandler *reply,

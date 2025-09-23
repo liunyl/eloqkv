@@ -483,9 +483,12 @@ VectorOpResult VectorHandler::Drop(const std::string &name)
 }
 
 VectorOpResult VectorHandler::Info(const std::string &name,
-                                   TransactionExecution *txm,
                                    VectorMetadata &metadata)
 {
+    TransactionExecution *txm =
+        NewTxInit(tx_service_,
+                  txservice::IsolationLevel::RepeatableRead,
+                  txservice::CcProtocol::Locking);
     // 1. Check if the index exists by reading from vector_index_meta_table
     std::string h_key = build_metadata_key(name);
     TxKey tx_key = EloqStringKey::Create(h_key.c_str(), h_key.size());
@@ -496,6 +499,7 @@ VectorOpResult VectorHandler::Info(const std::string &name,
     read_req.Wait();
     if (read_req.IsError())
     {
+        AbortTx(txm);
         return VectorOpResult::INDEX_META_OP_FAILED;
     }
 
@@ -503,6 +507,7 @@ VectorOpResult VectorHandler::Info(const std::string &name,
     if (read_req.Result().first != RecordStatus::Normal)
     {
         assert(read_req.Result().first == RecordStatus::Deleted);
+        CommitTx(txm);
         // The index does not exist
         return VectorOpResult::INDEX_NOT_EXIST;
     }
@@ -515,15 +520,19 @@ VectorOpResult VectorHandler::Info(const std::string &name,
     size_t offset = 0;
     metadata.Decode(blob_data, blob_size, offset, index_version);
 
+    CommitTx(txm);
     return VectorOpResult::SUCCEED;
 }
 
 VectorOpResult VectorHandler::Search(const std::string &name,
                                      const std::vector<float> &query_vector,
                                      size_t k_count,
-                                     TransactionExecution *txm,
                                      SearchResult &vector_result)
 {
+    TransactionExecution *txm =
+        NewTxInit(tx_service_,
+                  txservice::IsolationLevel::RepeatableRead,
+                  txservice::CcProtocol::Locking);
     // 1. Check if the index exists by reading from vector_index_meta_table
     std::string h_key = build_metadata_key(name);
     TxKey tx_key = EloqStringKey::Create(h_key.c_str(), h_key.size());
@@ -534,6 +543,7 @@ VectorOpResult VectorHandler::Search(const std::string &name,
     read_req.Wait();
     if (read_req.IsError())
     {
+        AbortTx(txm);
         return VectorOpResult::INDEX_META_OP_FAILED;
     }
 
@@ -541,6 +551,7 @@ VectorOpResult VectorHandler::Search(const std::string &name,
     if (read_req.Result().first != RecordStatus::Normal)
     {
         assert(read_req.Result().first == RecordStatus::Deleted);
+        CommitTx(txm);
         // The index does not exist
         return VectorOpResult::INDEX_NOT_EXIST;
     }
@@ -552,20 +563,25 @@ VectorOpResult VectorHandler::Search(const std::string &name,
         GetOrCreateIndex(name, h_record, index_version, txm);
     if (get_result != VectorOpResult::SUCCEED)
     {
+        AbortTx(txm);
         return get_result;
     }
 
     // 4. Perform vector search
     auto search_result =
         index_sptr->search(query_vector, k_count, vector_result);
+    CommitTx(txm);
     return search_result.error;
 }
 
 VectorOpResult VectorHandler::Add(const std::string &name,
                                   uint64_t id,
-                                  const std::vector<float> &vector,
-                                  TransactionExecution *txm)
+                                  const std::vector<float> &vector)
 {
+    TransactionExecution *txm =
+        NewTxInit(tx_service_,
+                  txservice::IsolationLevel::RepeatableRead,
+                  txservice::CcProtocol::Locking);
     // 1. Check if the index exists by reading from vector_index_meta_table
     std::string h_key = build_metadata_key(name);
     TxKey tx_key = EloqStringKey::Create(h_key.c_str(), h_key.size());
@@ -576,12 +592,14 @@ VectorOpResult VectorHandler::Add(const std::string &name,
     read_req.Wait();
     if (read_req.IsError())
     {
+        AbortTx(txm);
         return VectorOpResult::INDEX_META_OP_FAILED;
     }
     // 2. Check if the index exists
     if (read_req.Result().first != RecordStatus::Normal)
     {
         assert(read_req.Result().first == RecordStatus::Deleted);
+        CommitTx(txm);
         // The index does not exist
         return VectorOpResult::INDEX_NOT_EXIST;
     }
@@ -591,6 +609,7 @@ VectorOpResult VectorHandler::Add(const std::string &name,
         GetOrCreateIndex(name, h_record, index_version, txm);
     if (get_result != VectorOpResult::SUCCEED)
     {
+        AbortTx(txm);
         return get_result;
     }
     // Add item to log object.
@@ -612,6 +631,7 @@ VectorOpResult VectorHandler::Add(const std::string &name,
                                       txm);
     if (log_err != LogError::SUCCESS)
     {
+        AbortTx(txm);
         return VectorOpResult::INDEX_LOG_OP_FAILED;
     }
     // 4. Add the vector to the index
@@ -619,6 +639,8 @@ VectorOpResult VectorHandler::Add(const std::string &name,
     if (add_result.error == VectorOpResult::SUCCEED &&
         index_sptr->get_persist_threshold() != -1)
     {
+        CommitTx(txm);
+
         // Persist the index if it has enough items
         std::lock_guard<std::shared_mutex> lock(vec_indexes_mutex_);
         uint64_t estimate_log_count = log_count * VECTOR_INDEX_LOG_SHARD_COUNT;
@@ -632,14 +654,22 @@ VectorOpResult VectorHandler::Add(const std::string &name,
                 [name] { VectorHandler::Instance().PersistIndex(name); });
         }
     }
+    else
+    {
+        AbortTx(txm);
+    }
+
     return add_result.error;
 }
 
 VectorOpResult VectorHandler::Update(const std::string &name,
                                      uint64_t id,
-                                     const std::vector<float> &vector,
-                                     TransactionExecution *txm)
+                                     const std::vector<float> &vector)
 {
+    TransactionExecution *txm =
+        NewTxInit(tx_service_,
+                  txservice::IsolationLevel::RepeatableRead,
+                  txservice::CcProtocol::Locking);
     // 1. Check if the index exists by reading from vector_index_meta_table
     std::string h_key = build_metadata_key(name);
     TxKey tx_key = EloqStringKey::Create(h_key.c_str(), h_key.size());
@@ -650,6 +680,7 @@ VectorOpResult VectorHandler::Update(const std::string &name,
     read_req.Wait();
     if (read_req.IsError())
     {
+        AbortTx(txm);
         return VectorOpResult::INDEX_META_OP_FAILED;
     }
 
@@ -657,6 +688,7 @@ VectorOpResult VectorHandler::Update(const std::string &name,
     if (read_req.Result().first != RecordStatus::Normal)
     {
         assert(read_req.Result().first == RecordStatus::Deleted);
+        CommitTx(txm);
         // The index does not exist
         return VectorOpResult::INDEX_NOT_EXIST;
     }
@@ -667,6 +699,7 @@ VectorOpResult VectorHandler::Update(const std::string &name,
         GetOrCreateIndex(name, h_record, index_version, txm);
     if (get_result != VectorOpResult::SUCCEED)
     {
+        AbortTx(txm);
         return get_result;
     }
 
@@ -689,6 +722,7 @@ VectorOpResult VectorHandler::Update(const std::string &name,
                                       txm);
     if (log_err != LogError::SUCCESS)
     {
+        AbortTx(txm);
         return VectorOpResult::INDEX_LOG_OP_FAILED;
     }
 
@@ -698,6 +732,7 @@ VectorOpResult VectorHandler::Update(const std::string &name,
     if (update_result.error == VectorOpResult::SUCCEED &&
         index_sptr->get_persist_threshold() != -1)
     {
+        CommitTx(txm);
         // Persist the index if it has enough items
         uint64_t estimate_log_count = log_count * VECTOR_INDEX_LOG_SHARD_COUNT;
         std::lock_guard<std::shared_mutex> lock(vec_indexes_mutex_);
@@ -711,13 +746,20 @@ VectorOpResult VectorHandler::Update(const std::string &name,
                 [name] { VectorHandler::Instance().PersistIndex(name); });
         }
     }
+    else
+    {
+        AbortTx(txm);
+    }
+
     return update_result.error;
 }
 
-VectorOpResult VectorHandler::Delete(const std::string &name,
-                                     uint64_t id,
-                                     TransactionExecution *txm)
+VectorOpResult VectorHandler::Delete(const std::string &name, uint64_t id)
 {
+    TransactionExecution *txm =
+        NewTxInit(tx_service_,
+                  txservice::IsolationLevel::RepeatableRead,
+                  txservice::CcProtocol::Locking);
     // 1. Check if the index exists by reading from vector_index_meta_table
     std::string h_key = build_metadata_key(name);
     TxKey tx_key = EloqStringKey::Create(h_key.c_str(), h_key.size());
@@ -728,6 +770,7 @@ VectorOpResult VectorHandler::Delete(const std::string &name,
     read_req.Wait();
     if (read_req.IsError())
     {
+        AbortTx(txm);
         return VectorOpResult::INDEX_META_OP_FAILED;
     }
 
@@ -735,6 +778,7 @@ VectorOpResult VectorHandler::Delete(const std::string &name,
     if (read_req.Result().first != RecordStatus::Normal)
     {
         assert(read_req.Result().first == RecordStatus::Deleted);
+        CommitTx(txm);
         // The index does not exist
         return VectorOpResult::INDEX_NOT_EXIST;
     }
@@ -746,6 +790,7 @@ VectorOpResult VectorHandler::Delete(const std::string &name,
         GetOrCreateIndex(name, h_record, index_version, txm);
     if (get_result != VectorOpResult::SUCCEED)
     {
+        AbortTx(txm);
         return get_result;
     }
 
@@ -770,6 +815,7 @@ VectorOpResult VectorHandler::Delete(const std::string &name,
                                       txm);
     if (log_err != LogError::SUCCESS)
     {
+        AbortTx(txm);
         return VectorOpResult::INDEX_LOG_OP_FAILED;
     }
 
@@ -779,6 +825,7 @@ VectorOpResult VectorHandler::Delete(const std::string &name,
     if (remove_result.error == VectorOpResult::SUCCEED &&
         index_sptr->get_persist_threshold() != -1)
     {
+        CommitTx(txm);
         // Persist the index if it has enough items
         std::lock_guard<std::shared_mutex> lock(vec_indexes_mutex_);
         uint64_t estimate_log_count = log_count * VECTOR_INDEX_LOG_SHARD_COUNT;
@@ -792,6 +839,11 @@ VectorOpResult VectorHandler::Delete(const std::string &name,
                 [name] { VectorHandler::Instance().PersistIndex(name); });
         }
     }
+    else
+    {
+        AbortTx(txm);
+    }
+
     return remove_result.error;
 }
 

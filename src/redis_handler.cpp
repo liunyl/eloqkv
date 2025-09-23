@@ -4953,11 +4953,8 @@ brpc::RedisCommandHandlerResult InfoVecIndexHandler::Run(
             reply.OnError("ERR vector command is not supported in transaction");
             return brpc::REDIS_CMD_HANDLED;
         }
-        // txm should not be bound to core since it is used in vector index
-        // worker pool
-        TransactionExecution *txm = redis_impl_->GetTxService()->NewTx();
-        txm->InitTx(iso_level_, cc_protocol_);
-        redis_impl_->ExecuteCommand(ctx, txm, &cmd, &reply, true);
+
+        redis_impl_->ExecuteCommand(ctx, &cmd, &reply);
     }
 
     return brpc::REDIS_CMD_HANDLED;
@@ -5007,9 +5004,8 @@ brpc::RedisCommandHandlerResult AddVecIndexHandler::Run(
             reply.OnError("ERR vector command is not supported in transaction");
             return brpc::REDIS_CMD_HANDLED;
         }
-        TransactionExecution *txm = redis_impl_->GetTxService()->NewTx();
-        txm->InitTx(iso_level_, cc_protocol_);
-        redis_impl_->ExecuteCommand(ctx, txm, &cmd, &reply, true);
+
+        redis_impl_->ExecuteCommand(ctx, &cmd, &reply);
     }
 
     return brpc::REDIS_CMD_HANDLED;
@@ -5034,11 +5030,8 @@ brpc::RedisCommandHandlerResult UpdateVecIndexHandler::Run(
             reply.OnError("ERR vector command is not supported in transaction");
             return brpc::REDIS_CMD_HANDLED;
         }
-        // txm should not be bound to core since it is used in vector index
-        // worker pool
-        TransactionExecution *txm = redis_impl_->GetTxService()->NewTx();
-        txm->InitTx(iso_level_, cc_protocol_);
-        redis_impl_->ExecuteCommand(ctx, txm, &cmd, &reply, true);
+
+        redis_impl_->ExecuteCommand(ctx, &cmd, &reply);
     }
 
     return brpc::REDIS_CMD_HANDLED;
@@ -5063,11 +5056,8 @@ brpc::RedisCommandHandlerResult DeleteVecIndexHandler::Run(
             reply.OnError("ERR vector command is not supported in transaction");
             return brpc::REDIS_CMD_HANDLED;
         }
-        // txm should not be bound to core since it is used in vector index
-        // worker pool
-        TransactionExecution *txm = redis_impl_->GetTxService()->NewTx();
-        txm->InitTx(iso_level_, cc_protocol_);
-        redis_impl_->ExecuteCommand(ctx, txm, &cmd, &reply, true);
+
+        redis_impl_->ExecuteCommand(ctx, &cmd, &reply);
     }
 
     return brpc::REDIS_CMD_HANDLED;
@@ -5092,11 +5082,8 @@ brpc::RedisCommandHandlerResult SearchVecIndexHandler::Run(
             reply.OnError("ERR vector command is not supported in transaction");
             return brpc::REDIS_CMD_HANDLED;
         }
-        // txm should not be bound to core since it is used in vector index
-        // worker pool
-        TransactionExecution *txm = redis_impl_->GetTxService()->NewTx();
-        txm->InitTx(iso_level_, cc_protocol_);
-        redis_impl_->ExecuteCommand(ctx, txm, &cmd, &reply, true);
+
+        redis_impl_->ExecuteCommand(ctx, &cmd, &reply);
     }
 
     return brpc::REDIS_CMD_HANDLED;
