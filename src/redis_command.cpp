@@ -19746,8 +19746,8 @@ std::tuple<bool, CreateVecIndexCommand> ParseCreateVecIndexCommand(
 
     // Minimum required parameters: ELOQVEC.CREATE <index_name> DIMENSIONS
     // <dimensions> METRIC <metric_type> ALGORITHM <algorithm> PERSIST_STRATEGY
-    // <persist_strategy> That's 9 arguments minimum (including the command)
-    if (args.size() < 9)
+    // <persist_strategy> That's 10 arguments minimum (including the command)
+    if (args.size() < 10)
     {
         output->OnError(
             "ERR wrong number of arguments for 'eloqvec.create' command");
@@ -19775,7 +19775,8 @@ std::tuple<bool, CreateVecIndexCommand> ParseCreateVecIndexCommand(
         output->OnError("ERR syntax error: expected 'DIMENSIONS' keyword");
         return {false, CreateVecIndexCommand()};
     }
-    if (!string2ull(args[pos].data(), args[pos].size(), dimensions))
+    if (!string2ull(args[pos].data(), args[pos].size(), dimensions) ||
+        dimensions == 0)
     {
         output->OnError(
             "ERR invalid value for DIMENSIONS: must be a positive integer");
@@ -20010,7 +20011,6 @@ void InfoVecIndexCommand::OutputResult(OutputHandler *reply,
 {
     if (result_.err_code_ == RD_OK)
     {
-        // For now, return a simple placeholder response
         auto &alg_params = metadata_.VecAlgParams();
         size_t len = (7 + alg_params.size()) * 2;
         reply->OnArrayStart(len);
@@ -20024,7 +20024,7 @@ void InfoVecIndexCommand::OutputResult(OutputHandler *reply,
         reply->OnString(
             EloqVec::distance_metric_to_string(metadata_.VecMetric()));
         reply->OnString("threshold");
-        reply->OnString(std::to_string(metadata_.PersistThreshold()));
+        reply->OnInt(metadata_.PersistThreshold());
         // algorithm parameters
         for (const auto &param : alg_params)
         {
