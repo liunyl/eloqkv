@@ -19992,7 +19992,7 @@ void InfoVecIndexCommand::OutputResult(OutputHandler *reply,
     if (result_.err_code_ == RD_OK)
     {
         auto &alg_params = metadata_.VecAlgParams();
-        size_t len = (6 + alg_params.size()) * 2;
+        size_t len = (7 + alg_params.size()) * 2;
         reply->OnArrayStart(len);
         reply->OnString("index_name");
         reply->OnString(index_name_.StringView());
