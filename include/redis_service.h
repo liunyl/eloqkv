@@ -405,6 +405,10 @@ public:
                         OutputHandler *output);
 
     bool ExecuteCommand(RedisConnectionContext *ctx,
+                        BAddVecIndexCommand *cmd,
+                        OutputHandler *output);
+
+    bool ExecuteCommand(RedisConnectionContext *ctx,
                         UpdateVecIndexCommand *cmd,
                         OutputHandler *output);
 
