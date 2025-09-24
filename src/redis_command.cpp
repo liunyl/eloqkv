@@ -20264,7 +20264,9 @@ bool BAddVecIndexCommand::ParseVectorData(const std::string_view &vector_str,
         }
         vector.push_back(val);
     }
-    return true;
+
+    // Treat whitespace-only input as invalid
+    return !vector.empty();
 }
 
 void BAddVecIndexCommand::OutputResult(OutputHandler *reply,
