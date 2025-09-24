@@ -20208,7 +20208,7 @@ void AddVecIndexCommand::OutputResult(OutputHandler *reply,
     }
 }
 
-bool BAddVecIndexCommand::ParseVectorData(std::string_view &vector_str,
+bool BAddVecIndexCommand::ParseVectorData(const std::string_view &vector_str,
                                           std::vector<float> &vector)
 {
     if (vector_str.empty())
