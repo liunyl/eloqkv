@@ -24,6 +24,7 @@
 #include <brpc/acceptor.h>
 #include <butil/endpoint.h>
 #include <butil/logging.h>
+#include <ctype.h>
 #include <strings.h>
 #include <sys/times.h>
 #include <unistd.h>
@@ -20131,9 +20132,8 @@ std::tuple<bool, BAddVecIndexCommand> ParseBAddVecIndexCommand(
 
     if (key_count > BAddVecIndexCommand::MAX_BATCH_ADD_SIZE)
     {
-        output->OnError(
-            "ERR The key count exceeds the maximum batch value:" +
-            std::to_string(BAddVecIndexCommand::MAX_BATCH_ADD_SIZE));
+        std::string msg("ERR The key count exceeds the maximum batch value:");
+        msg.append(std::to_string(BAddVecIndexCommand::MAX_BATCH_ADD_SIZE));
         return {false, BAddVecIndexCommand()};
     }
 
@@ -20142,9 +20142,11 @@ std::tuple<bool, BAddVecIndexCommand> ParseBAddVecIndexCommand(
     const size_t pair_args = args.size() - 3;
     if (pair_args % 2 != 0 || pair_args / 2 != key_count)
     {
-        output->OnError("ERR wrong number of arguments: expected " +
-                        std::to_string(key_count * 2 + 3) + " but got " +
-                        std::to_string(args.size()));
+        std::string msg("ERR wrong number of arguments: expected ");
+        msg.append(std::to_string(key_count * 2 + 3))
+            .append(" but got ")
+            .append(std::to_string(args.size()));
+        output->OnError(msg);
         return {false, BAddVecIndexCommand()};
     }
 
@@ -20217,7 +20219,7 @@ bool BAddVecIndexCommand::ParseVectorData(std::string_view &vector_str,
     size_t estimated_size = 1;  // At least one value
     for (char c : vector_str)
     {
-        if (std::isspace(c))
+        if (std::isspace(static_cast<unsigned char>(c)))
         {
             estimated_size++;
         }
@@ -20233,7 +20235,8 @@ bool BAddVecIndexCommand::ParseVectorData(std::string_view &vector_str,
     while (current < end)
     {
         // Skip leading whitespace
-        while (current < end && std::isspace(*current))
+        while (current < end &&
+               std::isspace(static_cast<unsigned char>(*current)))
         {
             ++current;
         }
@@ -20245,7 +20248,8 @@ bool BAddVecIndexCommand::ParseVectorData(std::string_view &vector_str,
 
         // Find the end of the current number
         const char *num_start = current;
-        while (current < end && !std::isspace(*current))
+        while (current < end &&
+               !std::isspace(static_cast<unsigned char>(*current)))
         {
             ++current;
         }
