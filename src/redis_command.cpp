@@ -20134,6 +20134,7 @@ std::tuple<bool, BAddVecIndexCommand> ParseBAddVecIndexCommand(
     {
         std::string msg("ERR The key count exceeds the maximum batch value:");
         msg.append(std::to_string(BAddVecIndexCommand::MAX_BATCH_ADD_SIZE));
+        output->OnError(msg);
         return {false, BAddVecIndexCommand()};
     }
 
