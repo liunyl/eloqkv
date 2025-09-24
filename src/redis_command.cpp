@@ -20129,13 +20129,21 @@ std::tuple<bool, BAddVecIndexCommand> ParseBAddVecIndexCommand(
         return {false, BAddVecIndexCommand()};
     }
 
+    if (key_count > BAddVecIndexCommand::MAX_BATCH_ADD_SIZE)
+    {
+        output->OnError(
+            "ERR The key count exceeds the maximum batch value:" +
+            std::to_string(BAddVecIndexCommand::MAX_BATCH_ADD_SIZE));
+        return {false, BAddVecIndexCommand()};
+    }
+
     // Calculate expected argument count: command + index_name + key_count +
     // key_count * 2 (key + vector_data)
-    size_t expected_args = 3 + key_count * 2;
-    if (args.size() != expected_args)
+    const size_t pair_args = args.size() - 3;
+    if (pair_args % 2 != 0 || pair_args / 2 != key_count)
     {
         output->OnError("ERR wrong number of arguments: expected " +
-                        std::to_string(expected_args) + " but got " +
+                        std::to_string(key_count * 2 + 3) + " but got " +
                         std::to_string(args.size()));
         return {false, BAddVecIndexCommand()};
     }

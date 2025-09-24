@@ -7034,6 +7034,8 @@ struct AddVecIndexCommand
 
 struct BAddVecIndexCommand
 {
+    static constexpr uint64_t MAX_BATCH_ADD_SIZE = 10000;
+
     BAddVecIndexCommand() = default;
 
     // Constructor with required parameters

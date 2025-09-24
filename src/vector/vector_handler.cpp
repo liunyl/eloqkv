@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <mutex>
 #include <shared_mutex>
+#include <unordered_map>
 #include <utility>
 
 #include "hnsw_vector_index.h"
@@ -903,6 +904,12 @@ VectorOpResult VectorHandler::BatchAdd(
     const std::vector<uint64_t> &ids,
     const std::vector<std::vector<float>> &vectors)
 {
+    // Check if the ids and vectors are valid
+    if (ids.empty() || ids.size() != vectors.size())
+    {
+        return VectorOpResult::INDEX_ADD_FAILED;
+    }
+
     TransactionExecution *txm = NewTxInit(
         tx_service_, IsolationLevel::RepeatableRead, CcProtocol::Locking);
 
