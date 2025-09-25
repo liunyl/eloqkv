@@ -20222,8 +20222,8 @@ std::tuple<bool, UpdateVecIndexCommand> ParseUpdateVecIndexCommand(
 {
     assert(args[0] == "eloqvec.update" || args[0] == "ELOQVEC.UPDATE");
 
-    // ELOQVEC.UPDATE <index_name> <key> <vector_data>
-    if (args.size() < 4)
+    // ELOQVEC.UPDATE <index_name> <key> "vector_data"
+    if (args.size() != 4)
     {
         output->OnError(
             "ERR wrong number of arguments for 'eloqvec.update' command");
@@ -20232,6 +20232,7 @@ std::tuple<bool, UpdateVecIndexCommand> ParseUpdateVecIndexCommand(
 
     std::string_view index_name = args[1];
     std::string_view key_str = args[2];
+    std::string_view vector_data_str = args[3];
 
     // Validate index name is not empty
     if (index_name.empty())
@@ -20250,18 +20251,10 @@ std::tuple<bool, UpdateVecIndexCommand> ParseUpdateVecIndexCommand(
 
     // Parse vector data
     std::vector<float> vector_data;
-    size_t i = 3;
-    // Parse vector data (until we hit end of args)
-    while (i < args.size())
+    if (!ParseVectorData(vector_data_str, vector_data))
     {
-        float val;
-        if (!string2float(args[i].data(), args[i].size(), val))
-        {
-            output->OnError("ERR vector data must contain valid float values");
-            return {false, UpdateVecIndexCommand()};
-        }
-        vector_data.push_back(val);
-        i++;
+        output->OnError("ERR vector data must be valid float values");
+        return {false, UpdateVecIndexCommand()};
     }
 
     // Validate vector is not empty
