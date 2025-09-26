@@ -297,8 +297,8 @@ VectorHandler &VectorHandler::Instance()
  */
 VectorOpResult VectorHandler::Create(const IndexConfig &idx_spec)
 {
-    TransactionExecution *txm = NewTxInit(
-        tx_service_, IsolationLevel::RepeatableRead, CcProtocol::Locking);
+    TransactionExecution *txm =
+        NewTxInit(tx_service_, IsolationLevel::RepeatableRead, CcProtocol::OCC);
     // For the internal table, there is no need to acquire read lock on catalog.
     std::string h_key = build_metadata_key(idx_spec.name);
     TxKey tx_key = EloqStringKey::Create(h_key.c_str(), h_key.size());
@@ -396,9 +396,7 @@ VectorOpResult VectorHandler::Create(const IndexConfig &idx_spec)
 VectorOpResult VectorHandler::Drop(const std::string &name)
 {
     TransactionExecution *txm =
-        NewTxInit(tx_service_,
-                  txservice::IsolationLevel::RepeatableRead,
-                  txservice::CcProtocol::Locking);
+        NewTxInit(tx_service_, IsolationLevel::RepeatableRead, CcProtocol::OCC);
     // 1. Check if the index exists by reading from vector_index_meta_table
     std::string h_key = build_metadata_key(name);
     TxKey tx_key = EloqStringKey::Create(h_key.c_str(), h_key.size());
@@ -487,9 +485,7 @@ VectorOpResult VectorHandler::Info(const std::string &name,
                                    VectorMetadata &metadata)
 {
     TransactionExecution *txm =
-        NewTxInit(tx_service_,
-                  txservice::IsolationLevel::RepeatableRead,
-                  txservice::CcProtocol::Locking);
+        NewTxInit(tx_service_, IsolationLevel::RepeatableRead, CcProtocol::OCC);
     // 1. Check if the index exists by reading from vector_index_meta_table
     std::string h_key = build_metadata_key(name);
     TxKey tx_key = EloqStringKey::Create(h_key.c_str(), h_key.size());
@@ -531,9 +527,7 @@ VectorOpResult VectorHandler::Search(const std::string &name,
                                      SearchResult &vector_result)
 {
     TransactionExecution *txm =
-        NewTxInit(tx_service_,
-                  txservice::IsolationLevel::RepeatableRead,
-                  txservice::CcProtocol::Locking);
+        NewTxInit(tx_service_, IsolationLevel::RepeatableRead, CcProtocol::OCC);
     // 1. Check if the index exists by reading from vector_index_meta_table
     std::string h_key = build_metadata_key(name);
     TxKey tx_key = EloqStringKey::Create(h_key.c_str(), h_key.size());
@@ -577,9 +571,7 @@ VectorOpResult VectorHandler::Add(const std::string &name,
                                   const std::vector<float> &vector)
 {
     TransactionExecution *txm =
-        NewTxInit(tx_service_,
-                  txservice::IsolationLevel::RepeatableRead,
-                  txservice::CcProtocol::Locking);
+        NewTxInit(tx_service_, IsolationLevel::RepeatableRead, CcProtocol::OCC);
     // 1. Check if the index exists by reading from vector_index_meta_table
     std::string h_key = build_metadata_key(name);
     TxKey tx_key = EloqStringKey::Create(h_key.c_str(), h_key.size());
@@ -674,9 +666,7 @@ VectorOpResult VectorHandler::Update(const std::string &name,
                                      const std::vector<float> &vector)
 {
     TransactionExecution *txm =
-        NewTxInit(tx_service_,
-                  txservice::IsolationLevel::RepeatableRead,
-                  txservice::CcProtocol::Locking);
+        NewTxInit(tx_service_, IsolationLevel::RepeatableRead, CcProtocol::OCC);
     // 1. Check if the index exists by reading from vector_index_meta_table
     std::string h_key = build_metadata_key(name);
     TxKey tx_key = EloqStringKey::Create(h_key.c_str(), h_key.size());
@@ -782,9 +772,7 @@ VectorOpResult VectorHandler::Update(const std::string &name,
 VectorOpResult VectorHandler::Delete(const std::string &name, uint64_t id)
 {
     TransactionExecution *txm =
-        NewTxInit(tx_service_,
-                  txservice::IsolationLevel::RepeatableRead,
-                  txservice::CcProtocol::Locking);
+        NewTxInit(tx_service_, IsolationLevel::RepeatableRead, CcProtocol::OCC);
     // 1. Check if the index exists by reading from vector_index_meta_table
     std::string h_key = build_metadata_key(name);
     TxKey tx_key = EloqStringKey::Create(h_key.c_str(), h_key.size());
@@ -900,8 +888,8 @@ VectorOpResult VectorHandler::BatchAdd(
         return VectorOpResult::INDEX_ADD_FAILED;
     }
 
-    TransactionExecution *txm = NewTxInit(
-        tx_service_, IsolationLevel::RepeatableRead, CcProtocol::Locking);
+    TransactionExecution *txm =
+        NewTxInit(tx_service_, IsolationLevel::RepeatableRead, CcProtocol::OCC);
 
     // 1. Check if the index exists by reading from vector_index_meta_table
     std::string h_key = build_metadata_key(name);
@@ -934,7 +922,8 @@ VectorOpResult VectorHandler::BatchAdd(
     }
 
     // Group ids by shard id
-    std::unordered_map<uint32_t, std::vector<size_t>> shard_group;
+    // Sort the shard id to avoid potential deadlock.
+    std::map<uint32_t, std::vector<size_t>> shard_group;
     for (size_t i = 0; i < ids.size(); i++)
     {
         uint32_t shard_id = LogObject::get_shard_id(
@@ -1138,8 +1127,8 @@ VectorHandler::CreateAndInitializeIndex(const TxRecord::Uptr &h_record,
 VectorOpResult VectorHandler::PersistIndex(const std::string &name, bool force)
 {
     // 1. Create a new transaction for this persistence operation
-    TransactionExecution *txm = NewTxInit(
-        tx_service_, IsolationLevel::RepeatableRead, CcProtocol::Locking);
+    TransactionExecution *txm =
+        NewTxInit(tx_service_, IsolationLevel::RepeatableRead, CcProtocol::OCC);
 
     // 2. Check if the index exists and get its metadata
     std::string h_key = build_metadata_key(name);
