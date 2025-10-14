@@ -312,6 +312,7 @@ void append_items(const std::string &log_name,
             {
                 break;
             }
+            assert(result == LogError::STORAGE_ERROR);
             // Retry after 10ms
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             if (retry_times != nullptr)
@@ -514,7 +515,7 @@ TEST_CASE("LogObject Concurrent Append Operations", "[log-object]")
 
 TEST_CASE("LogObject Concurrent Scan Operations", "[log-object]")
 {
-    DLOG(INFO) << "LogObject Concurrent Truncate Operations start";
+    DLOG(INFO) << "LogObject Concurrent Scan Operations start";
     REQUIRE(tx_service != nullptr);
 
     // 1. create log object
@@ -686,7 +687,10 @@ void create_and_remove_worker(const std::string &log_name,
     assert(CommitTx(worker_txm).first);
 
     // reset op_succeed
-    op_succeed = false;
+    {
+        std::lock_guard<std::mutex> lk(mux);
+        op_succeed = false;
+    }
 
     // Try remove log object
     if (!try_remove_log_object(log_name, mux, cv, op_succeed))
@@ -832,7 +836,7 @@ TEST_CASE("LogObject Operations with Not Exist Log Object", "[log-object]")
     // 3. truncate log items with not exist log object
     uint64_t total_log_count = UINT64_MAX;
     truncate_log_object(log_name, total_log_count, num_shards, false);
-    REQUIRE(total_log_count == UINT64_MAX);
+    REQUIRE(total_log_count == 0);
 
     // 4. remove not exist log object
     remove_log_object(log_name, false);
