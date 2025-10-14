@@ -815,9 +815,9 @@ TEST_CASE("LogObject Operations on Empty LogObject", "[log-object]")
     DLOG(INFO) << "LogObject Operations on Empty LogObject done";
 }
 
-TEST_CASE("LogObject Operations with Not Exist Parameters", "[log-object]")
+TEST_CASE("LogObject Operations with Not Exist Log Object", "[log-object]")
 {
-    DLOG(INFO) << "LogObject Operations with Not Exist Parameters start";
+    DLOG(INFO) << "LogObject Operations with Not Exist Log Object start";
     REQUIRE(tx_service != nullptr);
 
     std::string log_name = get_log_name();
@@ -826,17 +826,18 @@ TEST_CASE("LogObject Operations with Not Exist Parameters", "[log-object]")
 
     // 2. scan log items with not exist log object
     std::vector<log_item_t> scanned_items;
-    scan_log_object(log_name, scanned_items, false);
+    scan_log_object(log_name, scanned_items, num_shards, false);
+    REQUIRE(scanned_items.empty());
 
     // 3. truncate log items with not exist log object
     uint64_t total_log_count = UINT64_MAX;
-    truncate_log_object(log_name, total_log_count, false);
+    truncate_log_object(log_name, total_log_count, num_shards, false);
     REQUIRE(total_log_count == UINT64_MAX);
 
     // 4. remove not exist log object
     remove_log_object(log_name, false);
 
-    DLOG(INFO) << "LogObject Operations with Not Exist Parameters done";
+    DLOG(INFO) << "LogObject Operations with Not Exist Log Object done";
 }
 
 TEST_CASE("LogObject Operations with Invalid Parameters", "[log-object]")
