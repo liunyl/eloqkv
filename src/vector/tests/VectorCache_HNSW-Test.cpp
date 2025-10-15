@@ -424,11 +424,10 @@ TEST_CASE("VectorCache HNSW Concurrency Add Batch & Search Operation",
 }
 
 /* id range of this case is [1801, 1900] */
-TEST_CASE("VectorCache HNSW Concurrency Invalid Parameters Operation",
+TEST_CASE("VectorCache HNSW Invalid Parameters Operation",
           "[vector-cache-hnsw]")
 {
-    DLOG(INFO)
-        << "VectorCache HNSW Concurrency Invalid Parameters Operation start";
+    DLOG(INFO) << "VectorCache HNSW Invalid Parameters Operation start";
     REQUIRE(vector_index != nullptr);
     REQUIRE(vector_index->is_ready());
 
@@ -455,8 +454,71 @@ TEST_CASE("VectorCache HNSW Concurrency Invalid Parameters Operation",
     result = vector_index->add_batch(vectors, ids);
     REQUIRE(result.error == VectorOpResult::VECTOR_DIMENSION_MISMATCH);
 
-    DLOG(INFO)
-        << "VectorCache HNSW Concurrency Invalid Parameters Operation done";
+    DLOG(INFO) << "VectorCache HNSW Invalid Parameters Operation done";
+}
+
+/* id range of this case is [1901, 2000] */
+TEST_CASE("VectorCache HNSW Concurrency Remove Operation",
+          "[vector-cache-hnsw]")
+{
+    DLOG(INFO) << "VectorCache HNSW Concurrency Remove Operation start";
+    REQUIRE(vector_index != nullptr);
+    REQUIRE(vector_index->is_ready());
+
+    // add a batch of vectors
+    std::vector<std::vector<float>> vectors = {
+        {1901.0, 1902.0, 1903.0, 1904.0},
+        {1911.0, 1912.0, 1913.0, 1914.0},
+        {1921.0, 1922.0, 1923.0, 1924.0},
+        {1931.0, 1932.0, 1933.0, 1934.0},
+        {1941.0, 1942.0, 1943.0, 1944.0},
+        {1951.0, 1952.0, 1953.0, 1954.0},
+        {1961.0, 1962.0, 1963.0, 1964.0},
+        {1971.0, 1972.0, 1973.0, 1974.0},
+        {1981.0, 1982.0, 1983.0, 1984.0},
+        {1991.0, 1992.0, 1993.0, 1994.0},
+    };
+    std::vector<uint64_t> ids = {
+        1901, 1902, 1903, 1904, 1905, 1906, 1907, 1908, 1909, 1910};
+    IndexOpResult result = vector_index->add_batch(vectors, ids);
+    REQUIRE(result.error == VectorOpResult::SUCCEED);
+
+    // remove the vector concurrently
+    const uint32_t worker_num = 10;
+    std::vector<std::thread> threads;
+    for (uint32_t i = 0; i < worker_num; ++i)
+    {
+        threads.emplace_back(
+            [i]()
+            {
+                float worker_step = i * 10.0f;
+                // get the vector
+                std::vector<float> vector_result;
+                IndexOpResult result =
+                    vector_index->get(1901 + i, vector_result);
+                assert(result.error == VectorOpResult::SUCCEED);
+                assert(vector_result.size() == 4);
+                assert(vector_result[0] == 1901.0f + worker_step);
+                assert(vector_result[1] == 1902.0f + worker_step);
+                assert(vector_result[2] == 1903.0f + worker_step);
+                assert(vector_result[3] == 1904.0f + worker_step);
+
+                // remove the vector
+                result = vector_index->remove(1901 + i);
+                assert(result.error == VectorOpResult::SUCCEED);
+
+                // get the vector
+                result = vector_index->get(1901 + i, vector_result);
+                assert(result.error == VectorOpResult::SUCCEED);
+                assert(vector_result.size() == 0);
+            });
+    }
+    for (auto &thread : threads)
+    {
+        thread.join();
+    }
+
+    DLOG(INFO) << "VectorCache HNSW Concurrency Remove Operation done";
 }
 
 }  // namespace EloqVec
