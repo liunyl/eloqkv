@@ -120,6 +120,11 @@ TEST_CASE("VectorCache HNSW Save & ReInit Operation", "[vector-cache-hnsw]")
     REQUIRE(vector_index != nullptr);
     REQUIRE(vector_index->is_ready());
 
+    // add a vector
+    std::vector<float> vector = {301.0, 302.0, 303.0, 304.0};
+    IndexOpResult res = vector_index->add(vector, 301);
+    REQUIRE(res.error == VectorOpResult::SUCCEED);
+
     bool result = vector_index->save(index_config.storage_path);
     REQUIRE(result);
 
@@ -132,17 +137,17 @@ TEST_CASE("VectorCache HNSW Save & ReInit Operation", "[vector-cache-hnsw]")
 
     // get the vector
     std::vector<float> vector_result;
-    IndexOpResult res = vector_index->get(201, vector_result);
+    res = vector_index->get(301, vector_result);
     REQUIRE(res.error == VectorOpResult::SUCCEED);
     REQUIRE(vector_result.size() == 4);
-    REQUIRE(vector_result[0] == 201.0);
-    REQUIRE(vector_result[1] == 202.0);
-    REQUIRE(vector_result[2] == 203.0);
-    REQUIRE(vector_result[3] == 204.0);
+    REQUIRE(vector_result[0] == 301.0);
+    REQUIRE(vector_result[1] == 302.0);
+    REQUIRE(vector_result[2] == 303.0);
+    REQUIRE(vector_result[3] == 304.0);
 
     // add a vector
-    std::vector<float> vector = {301.0, 302.0, 303.0, 304.0};
-    res = vector_index->add(vector, 301);
+    std::vector<float> vector1 = {311.0, 312.0, 313.0, 314.0};
+    res = vector_index->add(vector1, 311);
     REQUIRE(res.error == VectorOpResult::SUCCEED);
 
     DLOG(INFO) << "VectorCache HNSW Save & ReInit Operation done";
