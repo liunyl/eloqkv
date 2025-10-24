@@ -1,13 +1,24 @@
 /**
- * @file vector_type.h
- * @brief Vector type definitions for EloqVec
+ *    Copyright (C) 2025 EloqData Inc.
  *
- * This file defines the vector type definitions for EloqVec.
+ *    This program is free software: you can redistribute it and/or  modify
+ *    it under either of the following two licenses:
+ *    1. GNU Affero General Public License, version 3, as published by the Free
+ *    Software Foundation.
+ *    2. GNU General Public License as published by the Free Software
+ *    Foundation; version 2 of the License.
  *
- * @author EloqData Inc.
- * @date 2025
+ *    This program is distributed in the hope that it will be useful,
+ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *    GNU Affero General Public License or GNU General Public License for more
+ *    details.
+ *
+ *    You should have received a copy of the GNU Affero General Public License
+ *    and GNU General Public License V2 along with this program.  If not, see
+ *    <http://www.gnu.org/licenses/>.
+ *
  */
-
 #pragma once
 
 #include <algorithm>
@@ -28,6 +39,27 @@ inline static txservice::TableName vector_index_meta_table{
     vector_index_meta_table_name_sv,
     txservice::TableType::Primary,
     txservice::TableEngine::InternalHash};
+
+constexpr static std::string_view vector_metadata_table_name_sv{
+    "__vector_metadata_table"};
+
+inline static txservice::TableName vector_metadata_table{
+    vector_metadata_table_name_sv,
+    txservice::TableType::Primary,
+    txservice::TableEngine::InternalHash};
+
+/**
+ * @brief Metadata field types for vector record metadata
+ */
+enum class MetadataFieldType : uint8_t
+{
+    Int32 = 0,
+    Int64 = 1,
+    Double = 2,
+    Bool = 3,
+    String = 4,
+    Unknown = 255
+};
 
 /**
  * @brief Vector index algorithm types
@@ -177,6 +209,42 @@ inline PersistStrategy string_to_persist_strategy(const std::string_view &sv)
 }
 
 /**
+ * @brief Convert string to metadata field type enum
+ *
+ * @param sv String view representation of the metadata field type
+ * @return Metadata field type enum value
+ */
+inline MetadataFieldType string_to_field_type(const std::string_view &sv)
+{
+    std::string field_type_str(sv);
+    std::transform(field_type_str.begin(),
+                   field_type_str.end(),
+                   field_type_str.begin(),
+                   ::toupper);
+    if (field_type_str == "INT32")
+    {
+        return MetadataFieldType::Int32;
+    }
+    if (field_type_str == "INT64")
+    {
+        return MetadataFieldType::Int64;
+    }
+    if (field_type_str == "DOUBLE")
+    {
+        return MetadataFieldType::Double;
+    }
+    if (field_type_str == "BOOL")
+    {
+        return MetadataFieldType::Bool;
+    }
+    if (field_type_str == "STRING")
+    {
+        return MetadataFieldType::String;
+    }
+    return MetadataFieldType::Unknown;
+}
+
+/**
  * @brief Configuration parameters for vector index operations
  */
 struct IndexConfig
@@ -193,16 +261,11 @@ struct IndexConfig
     {
     }
 
-    size_t dimension = 0;                   ///< Vector dimension
-    size_t max_elements = 1000000;          ///< Maximum number of elements
-    Algorithm algorithm = Algorithm::HNSW;  ///< Algorithm type
-    DistanceMetric distance_metric =
-        DistanceMetric::L2SQ;  ///< Distance metric type
-
-    /// Index type specific parameters (e.g., m, ef_construction, ef_search for
-    /// HNSW) Marked mutable to allow adding default parameters in
-    /// initialize_usearch_index()
-    mutable std::unordered_map<std::string, std::string> params;
+    IndexConfig(const IndexConfig &) = delete;
+    IndexConfig(IndexConfig &&) = default;
+    IndexConfig &operator=(const IndexConfig &) = delete;
+    IndexConfig &operator=(IndexConfig &&) = default;
+    ~IndexConfig() = default;
 
     /**
      * @brief Encode IndexConfig to binary format
@@ -217,17 +280,99 @@ struct IndexConfig
      * @param offset Current offset in buffer (updated after decoding)
      */
     void Decode(const char *buf, size_t buff_size, size_t &offset);
+
+    // Vector dimension
+    size_t dimension = 0;
+    // Maximum number of elements
+    size_t max_elements = 1000000;
+    // Algorithm type
+    Algorithm algorithm = Algorithm::HNSW;
+    // Distance metric type
+    DistanceMetric distance_metric = DistanceMetric::L2SQ;
+    // Index type specific parameters (e.g., m, ef_construction, ef_search for
+    // HNSW) Marked mutable to allow adding default parameters in initialize()
+    mutable std::unordered_map<std::string, std::string> params;
+};
+
+/**
+ * @brief Vector record metadata schema definition
+ *
+ * This class represents the schema definition of vector record metadata,
+ * storing an ordered list of field names and their corresponding types.
+ */
+class VectorRecordMetadata
+{
+public:
+    VectorRecordMetadata() = default;
+    VectorRecordMetadata(std::vector<std::string> &&field_names,
+                         std::vector<MetadataFieldType> &&field_types)
+        : field_names_(std::move(field_names)),
+          field_types_(std::move(field_types))
+    {
+    }
+
+    VectorRecordMetadata(const VectorRecordMetadata &) = delete;
+    VectorRecordMetadata(VectorRecordMetadata &&) = default;
+    VectorRecordMetadata &operator=(const VectorRecordMetadata &) = delete;
+    VectorRecordMetadata &operator=(VectorRecordMetadata &&) = default;
+    ~VectorRecordMetadata() = default;
+
+    // Serialization methods
+    void Encode(std::string &encoded_str) const;
+    void Decode(const char *buf, size_t buff_size, size_t &offset);
+
+    // Schema operation methods
+    const std::vector<std::string> &FieldNames() const
+    {
+        return field_names_;
+    }
+
+    const std::vector<MetadataFieldType> &FieldTypes() const
+    {
+        return field_types_;
+    }
+
+    void AddMetadataField(const std::string &field_name,
+                          MetadataFieldType field_type);
+    bool HasMetadataField(const std::string &field_name) const
+    {
+        return std::find(field_names_.begin(),
+                         field_names_.end(),
+                         field_name) != field_names_.end();
+    }
+    bool CheckMetadataField(const std::string &field_name, size_t index) const
+    {
+        return index < field_names_.size() &&
+               field_names_[index].compare(field_name) == 0;
+    }
+
+    MetadataFieldType GetFieldType(const std::string &field_name) const;
+    MetadataFieldType GetFieldType(size_t index) const
+    {
+        assert(index < field_types_.size());
+        return field_types_[index];
+    }
+    size_t GetFieldIndex(const std::string &field_name) const;
+    size_t Size() const
+    {
+        return field_names_.size();
+    }
+
+    bool Empty() const
+    {
+        return field_names_.empty();
+    }
+
+private:
+    std::vector<std::string> field_names_;
+    std::vector<MetadataFieldType> field_types_;
 };
 
 /**
  * @brief Unified metadata for vector index combining configuration and state
  *
- * Design rationale:
- * - name: Index identifier (metadata, not algorithm config)
- * - persist_threshold: Persistence strategy (metadata, not algorithm config)
- * - file_path: Full path to persisted index file (runtime state)
- * - config_: Embedded algorithm configuration (eliminates duplication)
- * - timestamps: Lifecycle tracking (runtime state)
+ * This class encapsulates all metadata about a vector index, including
+ * the index configuration and vector record metadata schema.
  */
 class VectorIndexMetadata
 {
@@ -239,14 +384,22 @@ public:
      *
      * @param name Index name
      * @param config Algorithm configuration
+     * @param metadata Vector record metadata schema
      * @param persist_threshold Persistence threshold (-1 for manual)
      * @param storage_base_path Base directory for index files (used to generate
      * file_path)
      */
-    VectorIndexMetadata(const std::string &name,
-                        const IndexConfig &config,
+    VectorIndexMetadata(std::string &&name,
+                        IndexConfig &&config,
+                        VectorRecordMetadata &&metadata,
                         int64_t persist_threshold,
                         const std::string &storage_base_path);
+    ~VectorIndexMetadata() = default;
+
+    VectorIndexMetadata(const VectorIndexMetadata &) = delete;
+    VectorIndexMetadata(VectorIndexMetadata &&) = default;
+    VectorIndexMetadata &operator=(const VectorIndexMetadata &) = delete;
+    VectorIndexMetadata &operator=(VectorIndexMetadata &&) = default;
 
     /**
      * @brief Encode metadata to binary format
@@ -277,6 +430,11 @@ public:
     }
 
     // Metadata accessors
+    const VectorRecordMetadata &Metadata() const
+    {
+        return metadata_;
+    }
+
     int64_t PersistThreshold() const
     {
         return persist_threshold_;
@@ -287,6 +445,7 @@ public:
     {
         return file_path_;
     }
+
     void SetFilePath(const std::string &path)
     {
         file_path_ = path;
@@ -296,10 +455,12 @@ public:
     {
         return created_ts_;
     }
+
     uint64_t LastPersistTs() const
     {
         return last_persist_ts_;
     }
+
     void SetLastPersistTs(uint64_t ts)
     {
         last_persist_ts_ = ts;
@@ -307,13 +468,15 @@ public:
 
 private:
     // Index name
-    std::string name_;
+    std::string name_{""};
     // Embedded algorithm configuration
     IndexConfig config_;
+    // Vector record metadata
+    VectorRecordMetadata metadata_;
     // Persistence threshold (-1 = manual)
     int64_t persist_threshold_{10000};
     // Full path to persisted index file (with timestamp)
-    std::string file_path_;
+    std::string file_path_{""};
     // Creation timestamp
     uint64_t created_ts_{0};
     // Last persistence timestamp
@@ -351,6 +514,10 @@ enum class VectorOpResult
     INDEX_UPDATE_FAILED,
     INDEX_DELETE_FAILED,
     INDEX_LOG_OP_FAILED,
+    METADATA_OP_FAILED,
+    METADATA_FIELD_TYPE_MISMATCH,
+    METADATA_FIELD_NOT_IN_SCHEMA,
+    METADATA_FIELD_ALREADY_EXISTS,
     UNKNOWN,
 };
 
