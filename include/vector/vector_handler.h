@@ -175,6 +175,28 @@ private:
         std::shared_ptr<VectorIndexMetadata> metadata_;
     };
 
+    /**
+     * @brief Filter context for metadata-based search filtering
+     *
+     * This struct encapsulates all state needed for filtering vectors
+     * during search operations based on metadata predicates.
+     */
+    struct SearchFilterContext
+    {
+        SearchFilterContext(const std::string &name,
+                            const VectorRecordMetadata &metadata_schema,
+                            PredicateExpression &&pred,
+                            txservice::TransactionExecution *txm);
+        ~SearchFilterContext() = default;
+
+        bool EvaluateVector(uint64_t vector_id) const;
+
+        const std::string &name_;
+        const VectorRecordMetadata &schema_;
+        PredicateExpression predicate_;
+        txservice::TransactionExecution *txm_{nullptr};
+    };
+
     // Private constructor to prevent instantiation
     VectorHandler(txservice::TxService *tx_service,
                   txservice::TxWorkerPool *vector_index_worker_pool,

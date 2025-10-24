@@ -487,6 +487,58 @@ VectorOpResult VectorHandler::Info(const std::string &name,
     return VectorOpResult::SUCCEED;
 }
 
+// SearchFilterContext implementation
+VectorHandler::SearchFilterContext::SearchFilterContext(
+    const std::string &name,
+    const VectorRecordMetadata &metadata_schema,
+    PredicateExpression &&pred,
+    txservice::TransactionExecution *txm)
+    : name_(name),
+      schema_(metadata_schema),
+      predicate_(std::move(pred)),
+      txm_(txm)
+{
+}
+
+bool VectorHandler::SearchFilterContext::EvaluateVector(
+    uint64_t vector_id) const
+{
+    // Read metadata for this vector
+    std::string metadata_key = build_vector_metadata_key(name_, vector_id);
+    TxKey metadata_tx_key =
+        EloqStringKey::Create(metadata_key.c_str(), metadata_key.size());
+    TxRecord::Uptr metadata_record = EloqStringRecord::Create();
+
+    ReadTxRequest metadata_read_req(
+        &vector_metadata_table, 0, &metadata_tx_key, metadata_record.get());
+    txm_->Execute(&metadata_read_req);
+    metadata_read_req.Wait();
+
+    // If no metadata or read error, exclude from results
+    if (metadata_read_req.IsError() ||
+        metadata_read_req.Result().first != RecordStatus::Normal)
+    {
+        return false;
+    }
+
+    // Deserialize metadata
+    const char *blob_data = metadata_record->EncodedBlobData();
+    size_t blob_size = metadata_record->EncodedBlobSize();
+    std::vector<std::string_view> metadata;
+
+    try
+    {
+        DeserializeMetadataBySchema(blob_data, blob_size, schema_, metadata);
+    }
+    catch (const std::exception &e)
+    {
+        return false;  // Deserialization error, exclude
+    }
+
+    // Evaluate predicate against metadata
+    return predicate_.Evaluate(metadata, schema_);
+}
+
 VectorOpResult VectorHandler::Search(const std::string &name,
                                      const std::vector<float> &query_vector,
                                      size_t k_count,
