@@ -61,6 +61,16 @@ inline std::string build_log_name(const std::string &name)
     return name_pattern;
 }
 
+// Build metadata table key: {index_name}:{vector_id}
+inline std::string build_vector_metadata_key(const std::string &index_name,
+                                             uint64_t vector_id)
+{
+    std::string key;
+    key.reserve(index_name.size() + 20);
+    key.append(index_name).append(":").append(std::to_string(vector_id));
+    return key;
+}
+
 inline void serialize_vector(const std::vector<float> &vector,
                              std::string &result)
 {
@@ -81,6 +91,129 @@ inline void deserialize_vector(const std::string &vec_str,
         result.emplace_back(
             *reinterpret_cast<const float *>(vec_str.data() + offset));
         offset += sizeof(float);
+    }
+}
+
+// Serialize single metadata value
+static size_t SerializeMetadataValue(const std::string_view &binary_value,
+                                     MetadataFieldType type,
+                                     std::string &result)
+{
+    switch (type)
+    {
+    case MetadataFieldType::Int32:
+    case MetadataFieldType::Int64:
+    case MetadataFieldType::Double:
+    case MetadataFieldType::Bool:
+    {
+        // Fixed-length types: write value directly
+        result.append(binary_value.data(), binary_value.size());
+        return binary_value.size();
+    }
+    case MetadataFieldType::String:
+    {
+        // Variable-length type: write length + data
+        uint32_t value_len = static_cast<uint32_t>(binary_value.size());
+        result.append(reinterpret_cast<const char *>(&value_len),
+                      sizeof(uint32_t));
+        result.append(binary_value.data(), value_len);
+        return sizeof(uint32_t) + value_len;
+    }
+    default:
+        return 0;
+    }
+}
+
+// Serialize all metadata values in schema order
+static void SerializeMetadataBySchema(
+    const std::vector<std::string> &metadata_values,
+    const VectorRecordMetadata &schema,
+    std::string &result)
+{
+    assert(metadata_values.size() == schema.Size() &&
+           "Metadata values size mismatch");
+    const auto &field_names = schema.FieldNames();
+    const auto &field_types = schema.FieldTypes();
+
+    // Iterate through schema fields in order
+    for (size_t i = 0; i < field_names.size(); ++i)
+    {
+        MetadataFieldType field_type = field_types[i];
+        const std::string &binary_value = metadata_values[i];
+        SerializeMetadataValue(binary_value, field_type, result);
+    }
+}
+
+// Deserialize single metadata value
+static size_t DeserializeMetadataValue(const char *buf,
+                                       size_t buff_size,
+                                       size_t &offset,
+                                       MetadataFieldType type,
+                                       std::string_view &value)
+{
+    assert(offset < buff_size && "Offset out of bounds");
+    size_t value_len = 0;
+    switch (type)
+    {
+    case MetadataFieldType::Int32:
+    {
+        value_len = sizeof(int32_t);
+        break;
+    }
+    case MetadataFieldType::Int64:
+    {
+        value_len = sizeof(int64_t);
+        break;
+    }
+    case MetadataFieldType::Double:
+    {
+        value_len = sizeof(double);
+        break;
+    }
+    case MetadataFieldType::Bool:
+    {
+        value_len = sizeof(uint8_t);
+        break;
+    }
+    case MetadataFieldType::String:
+    {
+        assert(offset + sizeof(uint32_t) <= buff_size &&
+               "Offset out of bounds");
+        value_len = *reinterpret_cast<const uint32_t *>(buf + offset);
+        offset += sizeof(uint32_t);
+        break;
+    }
+    default:
+        assert(false && "Invalid metadata field type");
+    }
+    assert(offset + value_len <= buff_size && "Offset out of bounds");
+
+    value = std::string_view(buf + offset, value_len);
+    offset += value_len;
+    return value_len;
+}
+
+// Deserialize all metadata values in schema order
+static void DeserializeMetadataBySchema(const char *buf,
+                                        size_t buff_size,
+                                        const VectorRecordMetadata &schema,
+                                        std::vector<std::string_view> &metadata)
+{
+    metadata.clear();
+    const auto &field_names = schema.FieldNames();
+    const auto &field_types = schema.FieldTypes();
+
+    metadata.reserve(field_names.size());
+
+    size_t offset = 0;
+    // Iterate through schema fields in order
+    for (size_t i = 0; i < field_names.size() && offset < buff_size; ++i)
+    {
+        MetadataFieldType field_type = field_types[i];
+
+        std::string_view value;
+        DeserializeMetadataValue(buf, buff_size, offset, field_type, value);
+        metadata.emplace_back(std::move(value));
     }
 }
 
