@@ -500,6 +500,112 @@ struct SearchResult
     }
 };
 
+// ============================================================================
+// Predicate Expression for Search Filtering
+// ============================================================================
+enum class PredicateOp : uint8_t
+{
+    // Comparison operators
+    // Equal
+    EQ = 0,
+    // Not equal
+    NE = 1,
+    // Greater than
+    GT = 2,
+    // Greater than or equal
+    GE = 3,
+    // Less than
+    LT = 4,
+    // Less than or equal
+    LE = 5,
+    // Logical operators
+    // Logical AND
+    AND = 6,
+    // Logical OR
+    OR = 7,
+    // Logical NOT
+    NOT = 8,
+    // Unknown
+    UNKNOWN = 255
+};
+
+struct PredicateNode
+{
+    PredicateNode() = default;
+    PredicateNode(PredicateOp op_val,
+                  const std::string &field,
+                  const std::string &val)
+        : op_(op_val), field_name_(field), value_(val)
+    {
+    }
+
+    PredicateNode(const PredicateNode &) = delete;
+    PredicateNode(PredicateNode &&) = default;
+    PredicateNode &operator=(const PredicateNode &) = delete;
+    PredicateNode &operator=(PredicateNode &&) = default;
+
+    bool IsLeaf() const
+    {
+        return children_.empty();
+    }
+
+    PredicateOp op_;
+    std::string field_name_;
+    // Value of the predicate node with binary encoding
+    std::string value_;
+    std::vector<PredicateNode> children_;
+};
+
+class PredicateExpression
+{
+public:
+    PredicateExpression() = default;
+
+    /**
+     * @brief Parse a JSON-based filter expression
+     * @param json_str JSON filter view string (e.g., {"age": {"$gt": 18}})
+     * @param schema Metadata schema for field validation and type conversion
+     * @return true if parse succeeded, false otherwise
+     */
+    bool Parse(const std::string_view &json_str,
+               const VectorRecordMetadata &schema);
+
+    /**
+     * @brief Evaluate the predicate against metadata
+     * @param metadata Metadata field values
+     * @param schema Metadata schema for type information
+     * @return true if predicate is satisfied, false otherwise
+     */
+    bool Evaluate(const std::vector<std::string_view> &metadata,
+                  const VectorRecordMetadata &schema) const;
+
+    /**
+     * @brief Get the root node of the predicate tree
+     */
+    const PredicateNode &Root() const
+    {
+        return root_node_;
+    }
+
+private:
+    /**
+     * @brief Evaluate a single predicate node
+     */
+    bool EvaluateNode(const PredicateNode &node,
+                      const std::vector<std::string_view> &metadata,
+                      const VectorRecordMetadata &schema) const;
+
+    /**
+     * @brief Compare two values based on field type and operator
+     */
+    bool CompareValues(const std::string_view &lhs,
+                       const std::string &rhs,
+                       MetadataFieldType type,
+                       PredicateOp op) const;
+
+    PredicateNode root_node_;
+};
+
 enum class VectorOpResult
 {
     SUCCEED,

@@ -25,6 +25,7 @@
 #include <stdexcept>
 
 #include "tx_util.h"
+#include "vector_util.h"
 
 namespace EloqVec
 {
@@ -335,6 +336,406 @@ void VectorIndexMetadata::Decode(const char *buf,
     // last_persist_ts
     last_persist_ts_ = *reinterpret_cast<const uint64_t *>(buf + offset);
     offset += sizeof(uint64_t);
+}
+
+// ============================================================================
+// PredicateExpression Implementation
+// ============================================================================
+// Template helper for numeric type comparisons
+template <typename T>
+static bool CompareNumeric(const std::string_view &lhs,
+                           const std::string &rhs,
+                           PredicateOp op)
+{
+    assert(lhs.size() == sizeof(T) && "Invalid lhs size");
+    assert(rhs.size() == sizeof(T) && "Invalid rhs size");
+
+    T lhs_val = *reinterpret_cast<const T *>(lhs.data());
+    T rhs_val = *reinterpret_cast<const T *>(rhs.data());
+
+    switch (op)
+    {
+    case PredicateOp::EQ:
+    {
+        return lhs_val == rhs_val;
+    }
+    case PredicateOp::NE:
+    {
+        return lhs_val != rhs_val;
+    }
+    case PredicateOp::GT:
+    {
+        return lhs_val > rhs_val;
+    }
+    case PredicateOp::GE:
+    {
+        return lhs_val >= rhs_val;
+    }
+    case PredicateOp::LT:
+    {
+        return lhs_val < rhs_val;
+    }
+    case PredicateOp::LE:
+    {
+        return lhs_val <= rhs_val;
+    }
+    default:
+        return false;
+    }
+}
+
+// Specialization for double (with epsilon comparison for equality)
+template <>
+bool CompareNumeric<double>(const std::string_view &lhs,
+                            const std::string &rhs,
+                            PredicateOp op)
+{
+    assert(lhs.size() == sizeof(double) && "Invalid lhs size");
+    assert(rhs.size() == sizeof(double) && "Invalid rhs size");
+
+    double lhs_val = *reinterpret_cast<const double *>(lhs.data());
+    double rhs_val = *reinterpret_cast<const double *>(rhs.data());
+
+    constexpr double epsilon = 1e-9;
+
+    switch (op)
+    {
+    case PredicateOp::EQ:
+    {
+        return std::abs(lhs_val - rhs_val) < epsilon;
+    }
+    case PredicateOp::NE:
+    {
+        return std::abs(lhs_val - rhs_val) >= epsilon;
+    }
+    case PredicateOp::GT:
+    {
+        return lhs_val > rhs_val;
+    }
+    case PredicateOp::GE:
+    {
+        return lhs_val >= rhs_val;
+    }
+    case PredicateOp::LT:
+    {
+        return lhs_val < rhs_val;
+    }
+    case PredicateOp::LE:
+    {
+        return lhs_val <= rhs_val;
+    }
+    default:
+        return false;
+    }
+}
+
+// Parse operator string to PredicateOp enum
+PredicateOp ParseJSONOperator(const std::string &op)
+{
+    if (op == "$eq")
+    {
+        return PredicateOp::EQ;
+    }
+    if (op == "$ne")
+    {
+        return PredicateOp::NE;
+    }
+    if (op == "$gt")
+    {
+        return PredicateOp::GT;
+    }
+    if (op == "$gte")
+    {
+        return PredicateOp::GE;
+    }
+    if (op == "$lt")
+    {
+        return PredicateOp::LT;
+    }
+    if (op == "$lte")
+    {
+        return PredicateOp::LE;
+    }
+    return PredicateOp::UNKNOWN;
+}
+
+bool ParseSingleField(const std::string &field_name,
+                      const nlohmann::json &field_value,
+                      const VectorRecordMetadata &schema,
+                      PredicateNode &node)
+{
+    if (field_value.empty() || !field_value.is_object())
+    {
+        return false;
+    }
+
+    node.field_name_ = field_name;
+    // Verify field exists in schema
+    if (!schema.HasMetadataField(node.field_name_))
+    {
+        return false;
+    }
+
+    const std::string &op_str = field_value.begin().key();
+    node.op_ = ParseJSONOperator(op_str);
+    if (node.op_ == PredicateOp::UNKNOWN)
+    {
+        return false;
+    }
+
+    // Convert value to binary
+    MetadataFieldType field_type = schema.GetFieldType(node.field_name_);
+    if (!ParseJSONFieldValue(
+            field_value.begin().value(), field_type, node.value_))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool ParseJSONObject(const nlohmann::json &obj,
+                     const VectorRecordMetadata &schema,
+                     PredicateNode &node)
+{
+    if (!obj.is_object())
+    {
+        return false;
+    }
+
+    // Check for logical operators
+    if (obj.contains("$and"))
+    {
+        if (!obj["$and"].is_array())
+        {
+            return false;
+        }
+
+        node.op_ = PredicateOp::AND;
+        for (const auto &item : obj["$and"])
+        {
+            PredicateNode child_node;
+            if (!ParseJSONObject(item, schema, child_node))
+            {
+                return false;
+            }
+            node.children_.emplace_back(std::move(child_node));
+        }
+        return true;
+    }
+
+    if (obj.contains("$or"))
+    {
+        if (!obj["$or"].is_array())
+        {
+            return false;
+        }
+
+        node.op_ = PredicateOp::OR;
+        for (const auto &item : obj["$or"])
+        {
+            PredicateNode child_node;
+            if (!ParseJSONObject(item, schema, child_node))
+            {
+                return false;
+            }
+            node.children_.emplace_back(std::move(child_node));
+        }
+        return true;
+    }
+
+    if (obj.contains("$not"))
+    {
+        node.op_ = PredicateOp::NOT;
+        PredicateNode child_node;
+        if (!ParseJSONObject(obj["$not"], schema, child_node))
+        {
+            return false;
+        }
+        node.children_.emplace_back(std::move(child_node));
+        return true;
+    }
+
+    // Parse field comparisons
+    // Multiple fields at same level = implicit AND
+    if (obj.size() > 1)
+    {
+        node.op_ = PredicateOp::AND;
+        for (auto it = obj.begin(); it != obj.end(); ++it)
+        {
+            PredicateNode child_node;
+            if (!ParseSingleField(it.key(), it.value(), schema, child_node))
+            {
+                return false;
+            }
+            node.children_.emplace_back(std::move(child_node));
+        }
+        return true;
+    }
+
+    // Single field comparison
+    if (obj.empty())
+    {
+        return false;
+    }
+
+    auto it = obj.begin();
+    if (!ParseSingleField(it.key(), it.value(), schema, node))
+    {
+        return false;
+    }
+    return true;
+}
+
+bool PredicateExpression::Parse(const std::string_view &json_str,
+                                const VectorRecordMetadata &schema)
+{
+    if (json_str.empty())
+    {
+        return false;
+    }
+
+    try
+    {
+        nlohmann::json j = nlohmann::json::parse(json_str);
+        return ParseJSONObject(j, schema, root_node_);
+    }
+    catch (const std::exception &e)
+    {
+        // Parse error
+        return false;
+    }
+}
+
+bool PredicateExpression::Evaluate(
+    const std::vector<std::string_view> &metadata,
+    const VectorRecordMetadata &schema) const
+{
+    return EvaluateNode(root_node_, metadata, schema);
+}
+
+bool PredicateExpression::EvaluateNode(
+    const PredicateNode &node,
+    const std::vector<std::string_view> &metadata,
+    const VectorRecordMetadata &schema) const
+{
+    // Handle logical operators
+    switch (node.op_)
+    {
+    case PredicateOp::AND:
+    {
+        if (node.children_.size() < 2)
+        {
+            return false;
+        }
+        bool result = true;
+        for (size_t idx = 0; idx < node.children_.size() && result; ++idx)
+        {
+            const PredicateNode &child = node.children_[idx];
+            result = result && EvaluateNode(child, metadata, schema);
+        }
+        return result;
+    }
+    case PredicateOp::OR:
+    {
+        if (node.children_.size() < 2)
+        {
+            return false;
+        }
+        bool result = false;
+        for (size_t idx = 0; idx < node.children_.size() && !result; ++idx)
+        {
+            const PredicateNode &child = node.children_[idx];
+            result = result || EvaluateNode(child, metadata, schema);
+        }
+        return result;
+    }
+    case PredicateOp::NOT:
+    {
+        if (node.children_.size() != 1)
+        {
+            return false;
+        }
+        return !EvaluateNode(node.children_[0], metadata, schema);
+    }
+    default:
+        break;
+    }
+
+    // Handle comparison operators (leaf nodes)
+    assert(node.IsLeaf());
+    // Get field type from schema
+    assert(schema.HasMetadataField(node.field_name_));
+    size_t field_index = schema.GetFieldIndex(node.field_name_);
+    assert(field_index < metadata.size());
+    MetadataFieldType field_type = schema.GetFieldType(field_index);
+    const std::string_view &value = metadata[field_index];
+
+    // Compare values
+    return CompareValues(value, node.value_, field_type, node.op_);
+}
+
+bool PredicateExpression::CompareValues(const std::string_view &lhs,
+                                        const std::string &rhs,
+                                        MetadataFieldType type,
+                                        PredicateOp op) const
+{
+    switch (type)
+    {
+    case MetadataFieldType::Int32:
+    {
+        return CompareNumeric<int32_t>(lhs, rhs, op);
+    }
+    case MetadataFieldType::Int64:
+    {
+        return CompareNumeric<int64_t>(lhs, rhs, op);
+    }
+    case MetadataFieldType::Double:
+    {
+        return CompareNumeric<double>(lhs, rhs, op);
+    }
+    case MetadataFieldType::Bool:
+    {
+        assert(op == PredicateOp::EQ || op == PredicateOp::NE);
+        return CompareNumeric<uint8_t>(lhs, rhs, op);
+    }
+    case MetadataFieldType::String:
+    {
+        // Direct lexicographic comparison of UTF-8 bytes
+        int cmp = lhs.compare(rhs);
+        switch (op)
+        {
+        case PredicateOp::EQ:
+        {
+            return cmp == 0;
+        }
+        case PredicateOp::NE:
+        {
+            return cmp != 0;
+        }
+        case PredicateOp::GT:
+        {
+            return cmp > 0;
+        }
+        case PredicateOp::GE:
+        {
+            return cmp >= 0;
+        }
+        case PredicateOp::LT:
+        {
+            return cmp < 0;
+        }
+        case PredicateOp::LE:
+        {
+            return cmp <= 0;
+        }
+        default:
+            return false;
+        }
+    }
+    default:
+        return false;
+    }
 }
 
 }  // namespace EloqVec
