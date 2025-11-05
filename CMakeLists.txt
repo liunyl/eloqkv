@@ -459,6 +459,22 @@ set(USEARCH_INCLUDE_DIR
 )
 include_directories(${USEARCH_INCLUDE_DIR})
 
+# Add nlohmann/json dependency for vector indexing
+include(FetchContent)
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG        v3.12.0
+)
+FetchContent_MakeAvailable(nlohmann_json)
+set(NLOHMANN_JSON_INCLUDE_DIR ${nlohmann_json_SOURCE_DIR}/single_include)
+include_directories(${NLOHMANN_JSON_INCLUDE_DIR})
+
+# CRUL
+find_package(CURL REQUIRED)
+include_directories(${CURL_INCLUDE_DIRS})
+set(DYNAMIC_LIB ${DYNAMIC_LIB} ${CURL_LIBRARIES})
+
 INCLUDE(build_tx_service.cmake)
 
 if(WITH_LOG_SERVICE)
@@ -504,6 +520,7 @@ SET(RESELOQ_RESOURCES
     src/vector/vector_handler.cpp
     src/vector/log_object.cpp
     src/vector/vector_type.cpp
+    src/vector/cloud_manager.cpp
 )
 
 SET(INI_SOURCES src/ini.c src/INIReader.cpp)

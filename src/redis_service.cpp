@@ -1622,8 +1622,16 @@ bool RedisServiceImpl::Init(brpc::Server &brpc_server)
     }
 
     // Initialize vector handler
-    EloqVec::VectorHandler::InitHandlerInstance(
-        tx_service_.get(), vector_index_worker_pool_.get(), eloq_data_path);
+    EloqVec::CloudConfig vector_cloud_config(config_reader);
+    if (!EloqVec::VectorHandler::InitHandlerInstance(
+            tx_service_.get(),
+            vector_index_worker_pool_.get(),
+            eloq_data_path,
+            &vector_cloud_config))
+    {
+        LOG(ERROR) << "Failed to initialize vector handler instance";
+        return false;
+    }
 
     return true;
 }
@@ -1954,6 +1962,7 @@ bool RedisServiceImpl::InitTxLogService(
 
 void RedisServiceImpl::Stop()
 {
+    EloqVec::VectorHandler::DestroyHandlerInstance();
     if (vector_index_worker_pool_ != nullptr)
     {
         LOG(INFO) << "Shutting down the vector index worker pool.";
