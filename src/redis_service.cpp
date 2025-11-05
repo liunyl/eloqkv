@@ -183,9 +183,11 @@ DEFINE_bool(raft_log_async_fsync,
             "Whether raft log fsync is performed asynchronously (blocking the "
             "bthread) instead of blocking the worker thread");
 DEFINE_int32(core_number, 4, "Number of TxProcessors");
+#ifdef VECTOR_INDEX_ENABLED
 DEFINE_int32(vector_index_worker_num,
              1,
              "Number of Vector Index worker threads");
+#endif
 DEFINE_bool(
     bind_all,
     false,
@@ -1609,6 +1611,7 @@ bool RedisServiceImpl::Init(brpc::Server &brpc_server)
             : config_reader.GetBoolean(
                   "local", "retry_on_occ_error", FLAGS_retry_on_occ_error);
 
+#ifdef VECTOR_INDEX_ENABLED
     int vector_index_worker_num =
         !CheckCommandLineFlagIsDefault("vector_index_worker_num")
             ? FLAGS_vector_index_worker_num
@@ -1632,6 +1635,7 @@ bool RedisServiceImpl::Init(brpc::Server &brpc_server)
         LOG(ERROR) << "Failed to initialize vector handler instance";
         return false;
     }
+#endif
 
     return true;
 }
@@ -1962,6 +1966,7 @@ bool RedisServiceImpl::InitTxLogService(
 
 void RedisServiceImpl::Stop()
 {
+#ifdef VECTOR_INDEX_ENABLED
     EloqVec::VectorHandler::DestroyHandlerInstance();
     if (vector_index_worker_pool_ != nullptr)
     {
@@ -1970,6 +1975,7 @@ void RedisServiceImpl::Stop()
         vector_index_worker_pool_ = nullptr;
         LOG(INFO) << "Vector index worker pool shut down.";
     }
+#endif
 
     if (tx_service_ != nullptr)
     {
@@ -3067,6 +3073,7 @@ void RedisServiceImpl::AddHandlers()
     auto &keys_hd = hd_vec_.emplace_back(std::make_unique<KeysHandler>(this));
     AddCommandHandler("keys", keys_hd.get());
 
+#ifdef VECTOR_INDEX_ENABLED
     auto &create_vec_index_hd =
         hd_vec_.emplace_back(std::make_unique<CreateVecIndexHandler>(this));
     AddCommandHandler("eloqvec.create", create_vec_index_hd.get());
@@ -3098,6 +3105,7 @@ void RedisServiceImpl::AddHandlers()
     auto &search_vec_index_hd =
         hd_vec_.emplace_back(std::make_unique<SearchVecIndexHandler>(this));
     AddCommandHandler("eloqvec.search", search_vec_index_hd.get());
+#endif
 
     auto &dump_hd = hd_vec_.emplace_back(std::make_unique<DumpHandler>(this));
     AddCommandHandler("dump", dump_hd.get());
@@ -6434,6 +6442,7 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
     return true;
 }
 
+#ifdef VECTOR_INDEX_ENABLED
 bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
                                       CreateVecIndexCommand *cmd,
                                       OutputHandler *output)
@@ -6743,6 +6752,7 @@ bool RedisServiceImpl::ExecuteCommand(RedisConnectionContext *ctx,
     cmd->OutputResult(output, ctx);
     return true;
 }
+#endif
 
 const TableName *RedisServiceImpl::RedisTableName(int db_id) const
 {
