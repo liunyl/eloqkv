@@ -87,6 +87,23 @@ private:
                                 size_t size,
                                 size_t nmemb,
                                 std::string *data);
+
+    /**
+     * @brief Find the executable of the cloud service
+     *
+     * @param name Name of the executable
+     * @return The path of the executable
+     */
+    std::string FindExecutable(const std::string &name) const;
+
+    /**
+     * @brief Check if the port is available
+     *
+     * @param port Port number
+     * @return True if the port is available, false otherwise
+     */
+    bool IsPortAvailable(int port) const;
+
     /**
      * @brief Start the cloud service
      *

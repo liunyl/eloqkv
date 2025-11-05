@@ -23,8 +23,10 @@
 
 #include <fcntl.h>
 #include <glog/logging.h>
+#include <netinet/in.h>
 #include <signal.h>
 #include <spawn.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
 
 #include <nlohmann/json.hpp>
@@ -47,11 +49,84 @@ bool CloudManager::ConnectCloudService()
     return StartCloudService() && TryConnectCloudService() && CreateBucket();
 }
 
+std::string CloudManager::FindExecutable(const std::string &name) const
+{
+    // Check if the name is an absolute path and exists
+    if (name.find('/') != std::string::npos)
+    {
+        if (std::filesystem::exists(name) &&
+            std::filesystem::is_regular_file(name))
+        {
+            return name;
+        }
+        return "";
+    }
+
+    // Find the executable in the PATH environment variable
+    const char *path_env = getenv("PATH");
+    if (!path_env)
+    {
+        return "";
+    }
+
+    std::string path_str(path_env);
+    std::stringstream ss(path_str);
+    std::string dir;
+    while (std::getline(ss, dir, ':'))
+    {
+        if (dir.empty())
+        {
+            continue;
+        }
+
+        std::string full_path(dir);
+        full_path.append("/").append(name);
+        if (std::filesystem::exists(full_path) &&
+            std::filesystem::is_regular_file(full_path))
+        {
+            // Check if the file is executable
+            if (access(full_path.c_str(), X_OK) == 0)
+            {
+                return full_path;
+            }
+        }
+    }
+    return "";
+}
+
+bool CloudManager::IsPortAvailable(int port) const
+{
+    bool available = true;
+    // Check if the port is in use using socket
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == -1)
+    {
+        return false;
+    }
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = INADDR_ANY;
+    if (bind(sock, (struct sockaddr *) &addr, sizeof(addr)) != 0)
+    {
+        available = false;
+    }
+    close(sock);
+    return available;
+}
+
 bool CloudManager::StartCloudService()
 {
+    std::string rclone_path = FindExecutable("rclone");
+    if (rclone_path.empty())
+    {
+        LOG(ERROR) << "Failed to find rclone executable in PATH.";
+        return false;
+    }
+
     // Check if the port is already in use
-    int port_check = system("lsof -i :15572 >/dev/null 2>&1");
-    if (port_check == 0)
+    if (!IsPortAvailable(15572))
     {
         LOG(ERROR) << "Port 15572 is already in use";
         return false;
@@ -83,8 +158,8 @@ bool CloudManager::StartCloudService()
                                      O_WRONLY | O_CREAT | O_APPEND,
                                      0644);
     pid_t pid;
-    int ret =
-        posix_spawn(&pid, "/usr/bin/rclone", &actions, nullptr, argv, environ);
+    int ret = posix_spawn(
+        &pid, rclone_path.c_str(), &actions, nullptr, argv, environ);
     posix_spawn_file_actions_destroy(&actions);
     if (ret != 0)
     {
@@ -135,28 +210,18 @@ bool CloudManager::TryConnectCloudService() const
     // Try to connect to the cloud service
     const int max_retries = 10;
     int retries = 0;
-    CURLcode res = CURLE_COULDNT_CONNECT;
-    while (res != CURLE_OK)
+    bool connected = false;
+    std::string url(base_url_);
+    url.append("/rc/noop");
+    while (!connected)
     {
-        CURL *curl = curl_easy_init();
-        if (!curl)
-        {
-            LOG(ERROR) << "Failed to initialize curl";
-            return false;
-        }
-
-        std::string url(base_url_);
-        url.append("/rc/noop");
-        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 3L);
-        res = curl_easy_perform(curl);
-        curl_easy_cleanup(curl);
-        if (res != CURLE_OK && retries++ == max_retries - 1)
+        connected = PerformRequest(url, "{}");
+        if (!connected && retries++ == max_retries - 1)
         {
             LOG(ERROR) << "Failed to connect to cloud service";
             return false;
         }
-        else if (res != CURLE_OK)
+        else if (!connected)
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }

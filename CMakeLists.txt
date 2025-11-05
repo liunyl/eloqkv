@@ -463,7 +463,6 @@ if(VECTOR_INDEX_ENABLED)
        ${usearch_SOURCE_DIR}/fp16/include
     )
     include_directories(${USEARCH_INCLUDE_DIR})
-    set(DYNAMIC_LIB ${DYNAMIC_LIB} usearch)
     
     # Add nlohmann/json dependency for vector indexing
     include(FetchContent)
@@ -476,7 +475,7 @@ if(VECTOR_INDEX_ENABLED)
     set(NLOHMANN_JSON_INCLUDE_DIR ${nlohmann_json_SOURCE_DIR}/single_include)
     include_directories(${NLOHMANN_JSON_INCLUDE_DIR})
     
-    # CRUL
+    # CURL
     find_package(CURL REQUIRED)
     include_directories(${CURL_INCLUDE_DIRS})
     set(DYNAMIC_LIB ${DYNAMIC_LIB} ${CURL_LIBRARIES})
