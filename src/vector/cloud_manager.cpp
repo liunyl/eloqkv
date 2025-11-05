@@ -233,39 +233,40 @@ bool CloudManager::TryConnectCloudService() const
 bool CloudManager::CreateBucket() const
 {
     // Make a directory in the cloud service
-    if (cloud_config_.bucket_name_.empty())
+    if (cloud_config_.base_path_.empty())
     {
         LOG(ERROR) << "bucket name is empty";
         return false;
     }
     // check if the directory already exists using /operations/list
+    size_t slash_pos = cloud_config_.base_path_.find_first_of('/');
+    slash_pos = slash_pos == std::string::npos ? cloud_config_.base_path_.size()
+                                               : slash_pos;
+    std::string_view bucket_name(cloud_config_.base_path_.c_str(), slash_pos);
     nlohmann::json list_params;
-    list_params["fs"] = cloud_config_.endpoint_ + ":";
-    list_params["remote"] = cloud_config_.bucket_name_;
+    list_params.emplace("fs", cloud_config_.endpoint_ + ":");
+    list_params.emplace("remote", bucket_name);
     std::string list_url(base_url_);
     list_url.append("/operations/list");
     if (PerformRequest(list_url, list_params.dump()))
     {
         // directory already exists
-        DLOG(INFO) << "Bucket " << cloud_config_.bucket_name_
-                   << " already exists";
+        DLOG(INFO) << "Bucket " << bucket_name << " already exists";
         return true;
     }
 
     // create directory using operations/mkdir
     nlohmann::json mkdir_params;
-    mkdir_params["fs"] = cloud_config_.endpoint_ + ":";
-    mkdir_params["remote"] = cloud_config_.bucket_name_;
-    mkdir_params["parents"] = "true";
+    mkdir_params.emplace("fs", cloud_config_.endpoint_ + ":");
+    mkdir_params.emplace("remote", bucket_name);
     std::string mkdir_url(base_url_);
     mkdir_url.append("/operations/mkdir");
     if (!PerformRequest(mkdir_url, mkdir_params.dump()))
     {
-        LOG(ERROR) << "Failed to create bucket " << cloud_config_.bucket_name_;
+        LOG(ERROR) << "Failed to create bucket " << bucket_name;
         return false;
     }
-    DLOG(INFO) << "Bucket " << cloud_config_.bucket_name_
-               << " created successfully";
+    DLOG(INFO) << "Bucket " << bucket_name << " created successfully";
     return true;
 }
 
@@ -274,7 +275,7 @@ bool CloudManager::UploadFile(const std::string &local_file_path,
 {
     static const std::string upload_url(base_url_ + "/operations/copyfile");
     static const std::string remote_fs(cloud_config_.endpoint_ + ":" +
-                                       cloud_config_.bucket_name_);
+                                       cloud_config_.base_path_);
 
     nlohmann::json upload_params;
     upload_params.emplace("srcFs", "/");
@@ -298,7 +299,7 @@ bool CloudManager::DownloadFile(const std::string &remote_file_path,
 {
     static const std::string download_url(base_url_ + "/operations/copyfile");
     static const std::string remote_fs(cloud_config_.endpoint_ + ":" +
-                                       cloud_config_.bucket_name_);
+                                       cloud_config_.base_path_);
 
     nlohmann::json download_params;
     download_params.emplace("srcFs", remote_fs);
@@ -319,7 +320,7 @@ bool CloudManager::DeleteFile(const std::string &remote_file_path)
 {
     static const std::string delete_url(base_url_ + "/operations/deletefile");
     static const std::string remote_fs(cloud_config_.endpoint_ + ":" +
-                                       cloud_config_.bucket_name_);
+                                       cloud_config_.base_path_);
 
     nlohmann::json delete_params;
     delete_params.emplace("fs", remote_fs);

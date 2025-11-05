@@ -371,7 +371,7 @@ struct CloudConfig
     explicit CloudConfig(const INIReader &config_reader);
 
     std::string endpoint_;
-    std::string bucket_name_;
+    std::string base_path_;
 };
 
 }  // namespace EloqVec

@@ -26,9 +26,9 @@
 #include "tx_util.h"
 
 DEFINE_string(vector_cloud_endpoint, "", "vector cloud server endpoint");
-DEFINE_string(vector_cloud_bucket_name,
+DEFINE_string(vector_cloud_base_path,
               "vector-bucket",
-              "vector cloud bucket name");
+              "vector cloud base path");
 namespace EloqVec
 {
 inline bool CheckCommandLineFlagIsDefault(const char *name)
@@ -222,10 +222,10 @@ CloudConfig::CloudConfig(const INIReader &config_reader)
         !CheckCommandLineFlagIsDefault("vector_cloud_endpoint")
             ? FLAGS_vector_cloud_endpoint
             : config_reader.GetString("store", "vector_cloud_endpoint", "");
-    bucket_name_ =
-        !CheckCommandLineFlagIsDefault("vector_cloud_bucket_name")
-            ? FLAGS_vector_cloud_bucket_name
-            : config_reader.GetString("store", "vector_cloud_bucket_name", "");
+    base_path_ =
+        !CheckCommandLineFlagIsDefault("vector_cloud_base_path")
+            ? FLAGS_vector_cloud_base_path
+            : config_reader.GetString("store", "vector_cloud_base_path", "");
 }
 
 }  // namespace EloqVec
